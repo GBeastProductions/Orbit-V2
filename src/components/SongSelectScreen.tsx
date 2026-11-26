@@ -27,6 +27,7 @@ import {
   DIFFICULTIES,
   DIFFICULTY_ORDER,
 } from '../data/catalog';
+import { getSkinPack } from '../data/skinManifests';
 import {
   computeModMultiplier,
   computeNextMilestone,
@@ -45,6 +46,7 @@ import {
 } from '../types/game';
 import { DiscCartridge } from './DiscCartridge';
 import { OrbIcon } from './OrbIcon';
+import { SkinBladeTrim } from './SkinAtmosphere';
 
 interface SongSelectScreenProps {
   profile: PlayerProfile;
@@ -242,6 +244,7 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
       : null;
 
     const modMult = computeModMultiplier(profile.equippedMods);
+    const skin = getSkinPack(profile.theme);
 
     return (
       <motion.div
@@ -253,16 +256,30 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
         {/* Directional Readability Scrim */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#07080d]/92 via-[#07080d]/72 to-[#07080d]/84"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: `linear-gradient(90deg, ${skin.backdropScrimRgba} 0%, rgba(7,8,13,0.48) 55%, ${skin.backdropScrimRgba} 100%)`,
+          }}
         />
 
         {/* Top Bar (3-Zone Contract) */}
-        <header className="relative z-20 flex h-[56px] sm:h-[60px] shrink-0 items-center justify-between gap-2 sm:gap-4 border-b border-white/10 bg-[#080a11]/90 px-3 sm:px-8">
+        <header
+          className="relative z-20 flex h-[56px] sm:h-[60px] shrink-0 items-center justify-between gap-2 sm:gap-4 border-b px-3 sm:px-8"
+          style={{
+            backgroundColor: skin.headerBg,
+            borderColor: skin.surfaceBorder,
+          }}
+        >
+          <SkinBladeTrim themeId={profile.theme} />
           <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
             <button
               type="button"
               onClick={onBackToTitle}
-              className="tactile-btn lazer-slant-sm flex items-center gap-1.5 border border-white/15 bg-[#121624] px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+              className="tactile-btn lazer-slant-sm flex items-center gap-1.5 border px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+              style={{
+                backgroundColor: skin.bladeBg,
+                borderColor: skin.surfaceBorder,
+              }}
             >
               <span className="lazer-unslant-sm flex items-center gap-1.5">
                 <ArrowLeft className="h-3.5 w-3.5" />
@@ -737,7 +754,11 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                             <div
                               role="listbox"
                               aria-label="Library Pack Options"
-                              className="absolute left-0 top-[calc(100%+4px)] z-40 min-w-[190px] border border-[var(--accent-bright)]/55 bg-[#0b0e17]/98 py-1 shadow-[0_14px_38px_rgba(0,0,0,0.85)] backdrop-blur-md"
+                              className="absolute left-0 top-[calc(100%+4px)] z-40 min-w-[196px] border py-1 shadow-[0_14px_38px_rgba(0,0,0,0.88)] backdrop-blur-md"
+                              style={{
+                                backgroundColor: skin.surfaceElevatedBg,
+                                borderColor: skin.surfaceBorder,
+                              }}
                             >
                               {packOptions.map((opt) => {
                                 const isSel = libraryPack === opt.value;
@@ -936,6 +957,7 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                               imageUrl={art}
                               num={song.num}
                               title={song.title}
+                              themeId={profile.theme}
                               size="sm"
                               spinning={isSelected}
                               locked={!unlocked}
@@ -1118,12 +1140,19 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
         </main>
 
         {/* Bottom Dock */}
-        <footer className="relative z-20 flex h-[64px] sm:h-[68px] shrink-0 items-center justify-between gap-2 sm:gap-4 border-t border-white/10 bg-[#080a11]/95 px-3 sm:px-8">
+        <footer
+          className="relative z-20 flex h-[64px] sm:h-[68px] shrink-0 items-center justify-between gap-2 sm:gap-4 border-t px-3 sm:px-8 backdrop-blur-md"
+          style={{
+            backgroundColor: skin.headerBg,
+            borderColor: skin.surfaceBorder,
+          }}
+        >
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
               type="button"
               onClick={onOpenOrbVault}
-              className="tactile-btn lazer-slant-sm border border-white/15 bg-[#121624] px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-white hover:border-[#fbbf24] cursor-pointer whitespace-nowrap"
+              className="tactile-btn lazer-slant-sm border px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-white hover:border-[#fbbf24] cursor-pointer whitespace-nowrap"
+              style={{ backgroundColor: skin.bladeBg, borderColor: skin.surfaceBorder }}
             >
               <span className="lazer-unslant-sm flex items-center gap-1.5">
                 <OrbIcon className="h-4 w-4" />

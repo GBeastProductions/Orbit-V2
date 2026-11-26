@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import { audioEngine } from './audio/audioEngine';
 import { BackgroundBackdrop } from './components/BackgroundBackdrop';
 import { IndexScreen } from './components/IndexScreen';
@@ -8,13 +9,13 @@ import { OrbShopScreen } from './components/OrbShopScreen';
 import { CanvasRenderState, OrbitStage } from './components/OrbitStage';
 import { PauseDrawer } from './components/PauseDrawer';
 import { RunSummaryModal } from './components/RunSummaryModal';
-import { SettingsScreen } from './components/SettingsScreen';
+import { AuthAccountSummary, SettingsScreen } from './components/SettingsScreen';
+import { SkinAtmosphere } from './components/SkinAtmosphere';
 import { SongSelectScreen } from './components/SongSelectScreen';
 import { TitleScreen } from './components/TitleScreen';
 import { TopBar } from './components/TopBar';
 import {
   CHASSIS_THEMES,
-  DEV_PASSCODE,
   DIFFICULTIES,
   HERO_DISCO_IMAGE,
   MOD_CATALOG,
@@ -23,6 +24,15 @@ import {
   TUTORIAL_LESSONS,
   WAVE_MODES,
 } from './data/catalog';
+import { evaluateMilestoneThemes, getSkinPack } from './data/skinManifests';
+import {
+  auth,
+  checkUserDeveloperRole,
+  fetchUserCloudProfile,
+  signInWithGooglePopup,
+  signOutAccount,
+  syncUserProfileToCloud,
+} from './firebase';
 import {
   buildSongBeatmap,
   computeHitPoints,
@@ -195,6 +205,11 @@ function formatKeyLabel(e: KeyboardEvent): string {
 
 export default function App() {
   const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile());
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [authUser, setAuthUser] = useState<AuthAccountSummary | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isDeveloper, setIsDeveloper] = useState<boolean>(false);
   const [songs, setSongs] = useState<SongDefinition[]>(() => [
     ...SONG_CATALOG,
     ...getReleasedDailyWeeklySongs(),
@@ -399,15 +414,26 @@ export default function App() {
 
   useEffect(() => {
     const t = CHASSIS_THEMES[profile.theme] || CHASSIS_THEMES.tokyo_pink;
-    document.documentElement.style.setProperty('--theme-primary', t.primary);
-    document.documentElement.style.setProperty('--theme-bright', t.bright);
-    document.documentElement.style.setProperty('--theme-dim', t.dim);
-    document.documentElement.style.setProperty('--theme-on-primary', t.onPrimary);
-    document.documentElement.style.setProperty('--accent', t.primary);
-    document.documentElement.style.setProperty('--accent-bright', t.bright);
-    document.documentElement.style.setProperty('--accent-dim', t.dim);
-    document.documentElement.style.setProperty('--accent-on', t.onPrimary);
-    document.documentElement.style.setProperty('--bg-accent-rgb', t.bgAccentRgb);
+    const skin = getSkinPack(profile.theme);
+    const root = document.documentElement.style;
+    root.setProperty('--theme-primary', t.primary);
+    root.setProperty('--theme-bright', t.bright);
+    root.setProperty('--theme-dim', t.dim);
+    root.setProperty('--theme-on-primary', t.onPrimary);
+    root.setProperty('--accent', t.primary);
+    root.setProperty('--accent-bright', t.bright);
+    root.setProperty('--accent-dim', t.dim);
+    root.setProperty('--accent-on', t.onPrimary);
+    root.setProperty('--bg-accent-rgb', t.bgAccentRgb);
+    root.setProperty('--font-display', skin.displayFont);
+    root.setProperty('--font-sans', skin.bodyFont);
+    root.setProperty('--font-mono', skin.monoFont);
+    root.setProperty('--skin-surface', skin.surfaceBg);
+    root.setProperty('--skin-surface-elevated', skin.surfaceElevatedBg);
+    root.setProperty('--skin-border', skin.surfaceBorder);
+    root.setProperty('--skin-header', skin.headerBg);
+    root.setProperty('--skin-blade', skin.bladeBg);
+    root.setProperty('--skin-blade-hover', skin.bladeHoverBg);
   }, [profile.theme]);
 
   const updateProfile = useCallback(
@@ -420,6 +446,108 @@ export default function App() {
     },
     [],
   );
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setFirebaseUser(null);
+        setAuthUser(null);
+        setIsDeveloper(false);
+        setAuthLoading(false);
+        updateProfile((prev) => (prev.devUnlocked ? { ...prev, devUnlocked: false } : prev));
+        return;
+      }
+
+      setFirebaseUser(user);
+      setAuthUser({
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+      });
+      setAuthError(null);
+
+      try {
+        const dev = await checkUserDeveloperRole(user);
+        setIsDeveloper(dev);
+        const cloud = await fetchUserCloudProfile(user);
+        if (cloud) {
+          updateProfile((prev) => ({
+            ...prev,
+            unlockedThemes: Array.from(
+              new Set([...prev.unlockedThemes, ...(cloud.unlockedThemes || [])]),
+            ),
+            bestScore: Math.max(prev.bestScore, cloud.bestScore || 0),
+            bestStreak: Math.max(prev.bestStreak, cloud.bestStreak || 0),
+            totalOrbsEarned: Math.max(prev.totalOrbsEarned, cloud.totalOrbsEarned || 0),
+            tutorialSongCompleted:
+              prev.tutorialSongCompleted || Boolean(cloud.tutorialSongCompleted),
+            devUnlocked: dev ? prev.devUnlocked : false,
+          }));
+        } else {
+          updateProfile((prev) => ({
+            ...prev,
+            devUnlocked: dev ? prev.devUnlocked : false,
+          }));
+          if (user.emailVerified) {
+            await syncUserProfileToCloud(user, profileRef.current);
+          }
+        }
+      } catch (err) {
+        console.warn('Cloud profile sync warning:', err);
+      } finally {
+        setAuthLoading(false);
+      }
+    });
+    return () => unsub();
+  }, [updateProfile]);
+
+  useEffect(() => {
+    if (!firebaseUser || !firebaseUser.emailVerified) return;
+    const timer = window.setTimeout(() => {
+      void syncUserProfileToCloud(firebaseUser, profile).catch((err) => {
+        console.warn('Background profile backup skipped:', err);
+      });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [
+    firebaseUser,
+    profile.theme,
+    profile.unlockedThemes,
+    profile.bestScore,
+    profile.bestStreak,
+    profile.totalOrbsEarned,
+    profile.tutorialSongCompleted,
+  ]);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await signInWithGooglePopup();
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Google sign-in failed.');
+      setAuthLoading(false);
+    }
+  }, []);
+
+  const handleGoogleSignOut = useCallback(async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await signOutAccount();
+      updateProfile({ devUnlocked: false });
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Sign-out failed.');
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [updateProfile]);
+
+  const handleToggleDevUnlock = useCallback(() => {
+    if (!isDeveloper) return;
+    updateProfile((prev) => ({ ...prev, devUnlocked: !prev.devUnlocked }));
+  }, [isDeveloper, updateProfile]);
 
   const recordMechanicStat = (
     eng: RuntimeEngine,
@@ -608,6 +736,26 @@ export default function App() {
             },
           };
 
+      const prevSongDiffMap = p.songDiffRecords?.[song.id] || {};
+      const prevDiffRec = prevSongDiffMap[diffId];
+      const prevDiffIdx = prevDiffRec ? rankOrder.indexOf(prevDiffRec.bestRank) : 99;
+      const bestDiffRank =
+        prevDiffRec && prevDiffIdx >= 0 && prevDiffIdx < curIdx ? prevDiffRec.bestRank : rank;
+      const nextSongDiffRecords = isUnranked
+        ? p.songDiffRecords || {}
+        : {
+            ...(p.songDiffRecords || {}),
+            [song.id]: {
+              ...prevSongDiffMap,
+              [diffId]: {
+                bestScore: Math.max(prevDiffRec?.bestScore || 0, eng.score),
+                bestRank: bestDiffRank,
+                bestAccuracy: Math.max(prevDiffRec?.bestAccuracy || 0, accuracy),
+                bestCombo: Math.max(prevDiffRec?.bestCombo || 0, eng.maxStreakInRun),
+              },
+            },
+          };
+
       const nextTierBests = { ...p.tierBestScores };
       if (!isUnranked && eng.score > (nextTierBests[diffId] || 0)) {
         nextTierBests[diffId] = eng.score;
@@ -657,6 +805,14 @@ export default function App() {
             },
           );
 
+      const newlyUnlockedThemes = isUnranked
+        ? []
+        : evaluateMilestoneThemes({
+            ...p,
+            songRecords: nextRecords,
+            songDiffRecords: nextSongDiffRecords,
+          });
+
       const badgeBonusOrbs = newlyEarnedBadges.reduce((acc, b) => acc + b.orbReward, 0);
       const cashedOutOrbs = baseRunOrbs + badgeBonusOrbs;
       const nextOrbs = p.orbs + cashedOutOrbs;
@@ -700,6 +856,10 @@ export default function App() {
           totalOrbsEarned: nextTotalOrbs,
           totalOverdrives: prev.totalOverdrives + (eng.runTriggeredOverdrive ? 1 : 0),
           songRecords: nextRecords,
+          songDiffRecords: nextSongDiffRecords,
+          unlockedThemes: Array.from(
+            new Set([...prev.unlockedThemes, ...newlyUnlockedThemes]),
+          ),
           tierBestScores: nextTierBests,
           unlockedBadges: Array.from(
             new Set([...prev.unlockedBadges, ...newlyEarnedBadges.map((b) => b.id)]),
@@ -741,6 +901,7 @@ export default function App() {
         cashedOutOrbs,
         cashOutApproved,
         newlyEarnedBadges,
+        newlyUnlockedThemes,
         missReason: cleared ? undefined : eng.missReason,
         missDegrees: cleared ? undefined : eng.missDegrees,
         isNewBest,
@@ -3416,6 +3577,14 @@ export default function App() {
         forceDimPct={screen === 'TITLE' ? 58 : undefined}
         forceBlurPx={screen === 'TITLE' ? 2 : undefined}
         accentRgb={activeTheme.bgAccentRgb}
+        themeId={profile.theme}
+        preferSkinBackdrop={screen !== 'PLAYING'}
+      />
+
+      <SkinAtmosphere
+        themeId={profile.theme}
+        bgFxMode={profile.bgFxMode}
+        dimDuringPlay={screen === 'PLAYING'}
       />
 
       {screen === 'TITLE' && (
@@ -3453,6 +3622,13 @@ export default function App() {
         <SettingsScreen
           profile={profile}
           listeningSlot={listeningSlot}
+          authUser={authUser}
+          authLoading={authLoading}
+          authError={authError}
+          isDeveloper={isDeveloper}
+          onGoogleSignIn={handleGoogleSignIn}
+          onGoogleSignOut={handleGoogleSignOut}
+          onToggleDevUnlock={handleToggleDevUnlock}
           onStartRebind={(slot) => setListeningSlot(slot)}
           onBackToTitle={() => {
             setListeningSlot(0);
@@ -3495,13 +3671,6 @@ export default function App() {
           onOpenShop={() => {
             setPreviousScreen('SETTINGS');
             setScreen('SHOP');
-          }}
-          onDevUnlock={(code) => {
-            if (code.trim() === DEV_PASSCODE) {
-              updateProfile({ devUnlocked: true });
-              return true;
-            }
-            return false;
           }}
           onResetCareer={() => {
             updateProfile({ ...INITIAL_PROFILE });
@@ -3805,6 +3974,10 @@ export default function App() {
         onOpenOrbVault={() => {
           setSummaryData(null);
           openShopScreen();
+        }}
+        onEquipTheme={(tid) => {
+          updateProfile({ theme: tid });
+          audioEngine.playUiTick(profile.soundEnabled);
         }}
       />
 

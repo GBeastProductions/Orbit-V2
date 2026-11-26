@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "UserProfileDoc": {
+      "title": "UserProfileDoc",
+      "description": "Authenticated ORBIT player profile snapshot scoped strictly to its owner UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 180
+        },
+        "theme": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "unlockedThemes": {
+          "type": "array",
+          "description": "Bounded list of unlocked theme identifiers (max 20)."
+        },
+        "bestScore": {
+          "type": "integer"
+        },
+        "bestStreak": {
+          "type": "integer"
+        },
+        "totalOrbsEarned": {
+          "type": "integer"
+        },
+        "tutorialSongCompleted": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "theme",
+        "unlockedThemes",
+        "bestScore",
+        "bestStreak",
+        "totalOrbsEarned",
+        "tutorialSongCompleted",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DevRoleDoc": {
+      "title": "DevRoleDoc",
+      "description": "Read-only developer role assignment document provisioned in Firebase Console.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["developer", "admin"],
+          "maxLength": 20
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 180
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "role", "grantedAt"]
+    },
+    "ConnectionDoc": {
+      "title": "ConnectionDoc",
+      "description": "Public read-only health check document for startup Firestore offline diagnostics.",
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": ["ok"]
+    }
+  },
+  "firestore": {
+    "/user_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfileDoc" },
+      "description": "Owner-isolated player progression and unlocked skin snapshot."
+    },
+    "/dev_roles/{userId}": {
+      "schema": { "$ref": "#/entities/DevRoleDoc" },
+      "description": "Console-managed developer/admin role verification documents."
+    },
+    "/test/connection": {
+      "schema": { "$ref": "#/entities/ConnectionDoc" },
+      "description": "Startup Firestore server connectivity verification ping."
+    }
+  }
+}

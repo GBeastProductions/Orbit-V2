@@ -84,10 +84,17 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
         exit={{ x: '100%' }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e) => e.stopPropagation()}
-        className="flex h-dvh w-[min(94vw,430px)] flex-col border-l border-[var(--accent-bright)]/50 bg-[#0b0e16]/98 shadow-[-20px_0_60px_rgba(0,0,0,0.75)]"
+        className="flex h-dvh w-[min(94vw,430px)] flex-col border-l border-[var(--accent-bright)]/50 backdrop-blur-md shadow-[-20px_0_60px_rgba(0,0,0,0.75)]"
+        style={{ backgroundColor: 'var(--skin-surface, rgba(11, 14, 22, 0.98))' }}
       >
         {/* Drawer Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#121624] px-5 py-4">
+        <div
+          className="flex items-center justify-between gap-3 border-b px-5 py-4"
+          style={{
+            backgroundColor: 'var(--skin-header, #121624)',
+            borderColor: 'var(--skin-border, rgba(255,255,255,0.12))',
+          }}
+        >
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--accent-bright)]">
               Paused · 一時停止
@@ -369,7 +376,7 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
                     const t = CHASSIS_THEMES[tid];
                     const owned =
                       profile.devUnlocked ||
-                      t.orbCost === 0 ||
+                      (!t.isTransformationSkin && t.orbCost === 0) ||
                       profile.unlockedThemes.includes(tid);
                     const active = profile.theme === tid;
 

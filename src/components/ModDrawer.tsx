@@ -45,15 +45,22 @@ export const ModDrawer: React.FC<ModDrawerProps> = React.memo(
         aria-modal="true"
         aria-labelledby="modDrawerTitle"
         aria-hidden={!open}
-        className={`fixed bottom-0 left-1/2 z-50 flex max-h-[82dvh] w-[min(96vw,920px)] flex-col border-t-2 border-[var(--accent-bright)] bg-[#0b0e16]/98 shadow-2xl transition-transform duration-200 ease-out ${
+        className={`fixed bottom-0 left-1/2 z-50 flex max-h-[82dvh] w-[min(96vw,920px)] flex-col border-t-2 border-[var(--accent-bright)] shadow-2xl backdrop-blur-md transition-transform duration-200 ease-out ${
           open
             ? '-translate-x-1/2 translate-y-0'
             : '-translate-x-1/2 translate-y-[104%] pointer-events-none'
         }`}
+        style={{ backgroundColor: 'var(--skin-surface, rgba(11, 14, 22, 0.98))' }}
       >
         {open && (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#121624] px-6 py-4">
+            <div
+              className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4"
+              style={{
+                backgroundColor: 'var(--skin-header, #121624)',
+                borderColor: 'var(--skin-border, rgba(255,255,255,0.12))',
+              }}
+            >
               <div className="min-w-0">
                 <h3
                   id="modDrawerTitle"

@@ -9,10 +9,12 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { BADGE_CATALOG, CHASSIS_THEMES, WAVE_MODES } from '../data/catalog';
+import { getSkinPack } from '../data/skinManifests';
 import { computeMasteryPrestige } from '../engine/beatmap';
 import { PlayerProfile, SongDefinition } from '../types/game';
 import { DiscCartridge } from './DiscCartridge';
 import { IndexIcon, OrbIcon } from './OrbIcon';
+import { SkinBladeTrim } from './SkinAtmosphere';
 
 interface TitleScreenProps {
   profile: PlayerProfile;
@@ -41,6 +43,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
     onHoverTick,
   }) => {
     const theme = CHASSIS_THEMES[profile.theme] || CHASSIS_THEMES.tokyo_pink;
+    const skin = getSkinPack(profile.theme);
     const prestige = computeMasteryPrestige(profile, songs);
     const [pressedKey, setPressedKey] = useState<'k1' | 'k2' | null>(null);
     const [beatPhase, setBeatPhase] = useState(0);
@@ -138,24 +141,29 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
 
     return (
       <div className="relative z-10 flex h-dvh w-full flex-col justify-between overflow-hidden px-4 py-3 sm:px-10 sm:py-6">
-        {/* Radial disco turntable spotlight */}
+        {/* Radial disco / transformation spotlight */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0"
           style={{
-            background: `radial-gradient(circle at 28% 52%, rgba(${theme.bgAccentRgb}, 0.20) 0%, rgba(34, 211, 238, 0.06) 38%, rgba(7,8,13,0.78) 78%)`,
+            background: skin.isFullTransformation
+              ? `radial-gradient(circle at 28% 52%, rgba(${theme.bgAccentRgb}, 0.24) 0%, transparent 46%, rgba(7,8,13,0.48) 84%)`
+              : `radial-gradient(circle at 28% 52%, rgba(${theme.bgAccentRgb}, 0.20) 0%, rgba(34, 211, 238, 0.06) 38%, rgba(7,8,13,0.78) 78%)`,
           }}
         />
 
         {/* Top 3-Zone Header Contract */}
-        <header className="relative z-20 flex w-full items-center justify-between gap-4 border-b border-white/10 pb-3">
+        <header
+          className="relative z-20 flex w-full items-center justify-between gap-4 border-b pb-3"
+          style={{ borderColor: skin.surfaceBorder }}
+        >
           {/* Zone 1: Single-line Brand Wordmark */}
           <div className="flex items-baseline gap-3 whitespace-nowrap shrink-0">
             <span className="font-display text-2xl sm:text-3xl font-black tracking-tight text-white">
               ORBIT
             </span>
             <span className="text-xs font-semibold tracking-[0.22em] text-[var(--accent-bright)]">
-              オービット
+              {skin.isFullTransformation ? skin.subtitle : 'オービット'}
             </span>
           </div>
 
@@ -189,7 +197,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
             <button
               type="button"
               onClick={onToggleMusic}
-              className="tactile-btn lazer-slant-sm flex items-center gap-2 border border-white/15 bg-[#111521]/90 px-4 py-2 text-xs font-semibold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+              className="tactile-btn lazer-slant-sm flex items-center gap-2 border px-4 py-2 text-xs font-semibold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+              style={{
+                backgroundColor: skin.bladeBg,
+                borderColor: skin.surfaceBorder,
+              }}
               aria-label={profile.musicEnabled ? 'Mute Soundtrack' : 'Enable Soundtrack'}
             >
               <span className="lazer-unslant-sm flex items-center gap-2">
@@ -221,13 +233,14 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
                 onHoverTick();
               }}
               onMouseLeave={() => setDiscHovered(false)}
-              className="group relative overflow-hidden rounded-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-bright)]"
+              className="group relative overflow-visible rounded-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-bright)]"
               aria-label="Open Track Select"
             >
               <DiscCartridge
                 imageUrl={activeBg}
                 num={activeSong.num}
                 title={activeSong.title}
+                themeId={profile.theme}
                 size="hero"
                 spinning
                 beatPulse={beatPhase === 0 || discHovered}
@@ -274,14 +287,23 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
                   type="button"
                   onClick={item.onClick}
                   onMouseEnter={onHoverTick}
-                  className={`tactile-btn group lazer-slant relative flex items-center justify-between border px-5 py-2.5 sm:px-6 sm:py-3.5 text-left cursor-pointer ${
+                  className={`tactile-btn group lazer-slant relative overflow-visible flex items-center justify-between border px-5 py-2.5 sm:px-6 sm:py-3.5 text-left cursor-pointer ${
                     item.offsetClass
                   } ${
                     item.primary
                       ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)] shadow-[0_10px_32px_rgba(var(--bg-accent-rgb,255,59,130),0.28)] hover:bg-[var(--accent-bright)]'
-                      : 'border-white/14 bg-[#101420]/92 text-white hover:border-[var(--accent-bright)] hover:bg-[#171d2e]'
+                      : 'text-white hover:border-[var(--accent-bright)]'
                   }`}
+                  style={
+                    item.primary
+                      ? undefined
+                      : {
+                          backgroundColor: skin.bladeBg,
+                          borderColor: skin.surfaceBorder,
+                        }
+                  }
                 >
+                  <SkinBladeTrim themeId={profile.theme} />
                   <div className="lazer-unslant flex w-full items-center justify-between gap-4 min-w-0">
                     <div className="flex items-center gap-3.5 min-w-0">
                       {item.renderIcon()}
@@ -291,7 +313,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
                         </span>
                         <span
                           className={`block truncate text-[11px] sm:text-xs ${
-                            item.primary ? 'text-white/90 font-medium' : 'text-[#a1abbe]'
+                            item.primary ? 'text-white/90 font-medium' : 'text-[#b6bfd1]'
                           }`}
                         >
                           {item.sub}
@@ -301,7 +323,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
                     <span
                       aria-hidden="true"
                       className={`text-sm font-bold transition-transform duration-150 group-hover:translate-x-1 shrink-0 ${
-                        item.primary ? 'text-white' : 'text-white/45 group-hover:text-[var(--accent-bright)]'
+                        item.primary ? 'text-white' : 'text-white/55 group-hover:text-[var(--accent-bright)]'
                       }`}
                     >
                       →
@@ -313,8 +335,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
           </motion.nav>
         </main>
 
-        {/* Clean Footer Strip: Keybind Check + Era Tag */}
-        <footer className="relative z-20 flex w-full items-center justify-between gap-3 border-t border-white/10 pt-2.5 sm:pt-3 text-xs text-[#a1abbe] shrink-0">
+        {/* Clean Footer Strip: Keybind Check + Theme Era Tag */}
+        <footer
+          className="relative z-20 flex w-full items-center justify-between gap-3 border-t pt-2.5 sm:pt-3 text-xs text-[#b6bfd1] shrink-0"
+          style={{ borderColor: skin.surfaceBorder }}
+        >
           <div className="flex items-center gap-2 whitespace-nowrap">
             <span>Triggers</span>
             <span
@@ -322,8 +347,13 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
               className={`tactile-btn inline-flex items-center border px-2 py-0.5 sm:px-2.5 sm:py-1 font-mono text-[11px] font-bold ${
                 pressedKey === 'k1'
                   ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-white'
-                  : 'border-white/15 bg-[#111521] text-white'
+                  : 'text-white'
               }`}
+              style={
+                pressedKey === 'k1'
+                  ? undefined
+                  : { backgroundColor: skin.bladeBg, borderColor: skin.surfaceBorder }
+              }
             >
               {profile.trigger1Label}
             </span>
@@ -332,20 +362,25 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
               className={`tactile-btn inline-flex items-center border px-2 py-0.5 sm:px-2.5 sm:py-1 font-mono text-[11px] font-bold ${
                 pressedKey === 'k2'
                   ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-white'
-                  : 'border-white/15 bg-[#111521] text-white'
+                  : 'text-white'
               }`}
+              style={
+                pressedKey === 'k2'
+                  ? undefined
+                  : { backgroundColor: skin.bladeBg, borderColor: skin.surfaceBorder }
+              }
             >
               {profile.trigger2Label}
             </span>
             {profile.allowPointerTap && (
-              <span className="hidden sm:inline text-[#808ba1]">or Ring Click</span>
+              <span className="hidden sm:inline text-[#9aa5ba]">or Ring Click</span>
             )}
           </div>
 
-          <div className="flex items-center gap-2.5 whitespace-nowrap text-[#808ba1]">
-            <span>東京夜間音響</span>
+          <div className="flex items-center gap-2.5 whitespace-nowrap text-[#9aa5ba]">
+            <span>{skin.isFullTransformation ? skin.name : '東京夜間音響'}</span>
             <span aria-hidden="true">·</span>
-            <span>渋谷レコード</span>
+            <span>{skin.isFullTransformation ? skin.subtitle : '渋谷レコード'}</span>
           </div>
         </footer>
       </div>

@@ -16,8 +16,10 @@ import {
   DIFFICULTY_ORDER,
   MOD_CATALOG,
 } from '../data/catalog';
+import { getSkinPack } from '../data/skinManifests';
 import { DifficultyId, ModCode, PlayerProfile, SongDefinition, ThemeId } from '../types/game';
 import { OrbIcon } from './OrbIcon';
+import { SkinBladeTrim } from './SkinAtmosphere';
 
 type ShopTab = 'all' | 'tracks' | 'mods' | 'themes' | 'tiers';
 
@@ -80,9 +82,10 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
   const ownedThemeCount = allThemes.filter(
     (tid) =>
       profile.devUnlocked ||
-      CHASSIS_THEMES[tid].orbCost === 0 ||
+      (!CHASSIS_THEMES[tid].isTransformationSkin && CHASSIS_THEMES[tid].orbCost === 0) ||
       profile.unlockedThemes.includes(tid),
   ).length;
+  const skin = getSkinPack(profile.theme);
 
   return (
     <motion.div
@@ -96,18 +99,24 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
         style={{
-          background:
-            'radial-gradient(circle at 80% 14%, rgba(251, 191, 36, 0.10) 0%, rgba(16, 20, 34, 0.90) 48%, rgba(7, 8, 13, 0.97) 100%)',
+          background: skin.isFullTransformation
+            ? `radial-gradient(circle at 80% 14%, rgba(251, 191, 36, 0.08) 0%, ${skin.backdropScrimRgba} 48%, rgba(7, 8, 13, 0.88) 100%)`
+            : 'radial-gradient(circle at 80% 14%, rgba(251, 191, 36, 0.10) 0%, rgba(16, 20, 34, 0.90) 48%, rgba(7, 8, 13, 0.97) 100%)',
         }}
       />
 
       {/* Top 3-Zone Header */}
-      <header className="relative z-20 flex h-[60px] shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-[#080a11]/94 px-4 sm:px-8">
+      <header
+        className="relative z-20 flex h-[60px] shrink-0 items-center justify-between gap-4 border-b px-4 sm:px-8 backdrop-blur-md"
+        style={{ backgroundColor: skin.headerBg, borderColor: skin.surfaceBorder }}
+      >
+        <SkinBladeTrim themeId={profile.theme} />
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/15 bg-[#121624] px-3.5 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+            className="tactile-btn lazer-slant-sm flex items-center border px-3.5 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+            style={{ backgroundColor: skin.bladeBg, borderColor: skin.surfaceBorder }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -138,7 +147,8 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
       {/* Clean Segmented Navigation Bar */}
       <nav
         aria-label="Shop Categories"
-        className="relative z-20 flex shrink-0 items-center justify-between gap-4 overflow-x-auto border-b border-white/10 bg-[#0c101b]/92 px-4 py-2.5 sm:px-8"
+        className="relative z-20 flex shrink-0 items-center justify-between gap-4 overflow-x-auto border-b px-4 py-2.5 sm:px-8 backdrop-blur-md"
+        style={{ backgroundColor: skin.surfaceBg, borderColor: skin.surfaceBorder }}
       >
         <div className="flex items-center gap-1.5">
           {SHOP_TABS.map((t) => {
@@ -461,43 +471,62 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
           </section>
         )}
 
-        {/* SECTION 3: Cabinet Themes (Visual Stage Swatch Cards) */}
+        {/* SECTION 3: Cabinet Themes & Full-UI Transformation Skins */}
         {(tab === 'all' || tab === 'themes') && (
           <section>
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="font-display flex items-center gap-2 text-lg font-black text-white">
                 <Palette className="h-4 w-4 text-[var(--accent-bright)]" />
-                <span>Cabinet Themes ({allThemes.length})</span>
+                <span>Cabinet Themes &amp; Transformation Skins ({allThemes.length})</span>
               </h2>
-              <span className="text-xs text-[#a1abbe]">Customizes orbital ring glow, needle trails &amp; cabinet accent</span>
+              <span className="text-xs text-[#a1abbe]">
+                Unlock full-UI artistic skins by earning S/SS mastery clears
+              </span>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {allThemes.map((themeId) => {
                 const t = CHASSIS_THEMES[themeId];
+                const pack = getSkinPack(themeId);
+                const isTransform = Boolean(t.isTransformationSkin);
                 const owned =
-                  profile.devUnlocked || t.orbCost === 0 || profile.unlockedThemes.includes(themeId);
+                  profile.devUnlocked ||
+                  (!isTransform && t.orbCost === 0) ||
+                  profile.unlockedThemes.includes(themeId);
                 const active = profile.theme === themeId;
-                const canAfford = profile.orbs >= t.orbCost;
+                const canAfford = !isTransform && profile.orbs >= t.orbCost;
 
                 return (
                   <article
                     key={themeId}
                     className={`overflow-hidden rounded-lg border transition-colors ${
                       active
-                        ? 'border-[var(--accent-bright)] bg-[#141928]'
-                        : 'border-white/12 bg-[#0d111b]'
+                        ? 'border-[var(--accent-bright)]'
+                        : isTransform
+                        ? 'border-white/20'
+                        : 'border-white/12'
                     }`}
+                    style={{ backgroundColor: active ? skin.surfaceElevatedBg : skin.surfaceBg }}
                   >
-                    {/* Visual Stage Preview Strip */}
+                    {/* Visual Stage Preview Strip (Bespoke Illustrated Backdrop if Transformation Skin) */}
                     <div
-                      className="relative flex h-20 items-center justify-center overflow-hidden border-b border-white/10"
+                      className="relative flex h-24 items-center justify-center overflow-hidden border-b border-white/10"
                       style={{
                         background: `radial-gradient(circle at 50% 60%, rgba(${t.bgAccentRgb}, 0.28) 0%, #07090f 85%)`,
                       }}
                     >
+                      {pack.backdropImageUrl && (
+                        <img
+                          src={pack.backdropImageUrl}
+                          alt={t.label}
+                          referrerPolicy="no-referrer"
+                          className={`absolute inset-0 h-full w-full object-cover ${
+                            owned ? 'opacity-72' : 'opacity-40 grayscale'
+                          }`}
+                        />
+                      )}
                       <div
-                        className="flex h-12 w-12 items-center justify-center rounded-full border-[4px] bg-[#07080d]"
+                        className="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-[4px] bg-[#07080d]/90"
                         style={{
                           borderColor: t.primary,
                           boxShadow: `0 0 18px rgba(${t.bgAccentRgb}, 0.55)`,
@@ -508,7 +537,19 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
                           style={{ backgroundColor: t.secondary }}
                         />
                       </div>
-                      <span className="absolute right-2.5 top-2 text-[10px] font-bold tracking-wider text-white/60">
+                      {isTransform && (
+                        <span
+                          className="absolute left-2.5 top-2 z-10 border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider"
+                          style={{
+                            borderColor: `${t.primary}88`,
+                            backgroundColor: 'rgba(7, 8, 13, 0.86)',
+                            color: t.edgeTick,
+                          }}
+                        >
+                          Full Skin
+                        </span>
+                      )}
+                      <span className="absolute right-2.5 top-2 z-10 text-[10px] font-bold tracking-wider text-white/80 drop-shadow">
                         {t.jpLabel}
                       </span>
                     </div>
@@ -518,8 +559,12 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
                         <h3 className="font-display truncate text-sm font-extrabold text-white">
                           {t.label}
                         </h3>
-                        <p className="text-[11px] text-[#808ba1]">
-                          {t.orbCost === 0 ? 'Starter Cabinet' : 'Boutique Edition'}
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-[#9aa5ba]">
+                          {isTransform
+                            ? t.unlockRequirement || 'Skill Milestone Unlock'
+                            : t.orbCost === 0
+                            ? 'Starter Cabinet'
+                            : 'Boutique Edition'}
                         </p>
                       </div>
 
@@ -533,8 +578,13 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
                           onClick={() => onEquipTheme(themeId)}
                           className="tactile-btn rounded-md border border-white/15 bg-[#151a2a] py-1.5 text-xs font-bold text-white hover:border-white/35 cursor-pointer"
                         >
-                          Equip Theme
+                          Equip {isTransform ? 'Skin' : 'Theme'}
                         </button>
+                      ) : isTransform ? (
+                        <div className="flex items-center justify-center gap-1.5 rounded-md border border-white/12 bg-black/35 py-1.5 text-center text-[11px] font-bold text-[#a1abbe]">
+                          <Lock className="h-3 w-3 shrink-0" />
+                          <span>Earn via Skill Clear</span>
+                        </div>
                       ) : (
                         <button
                           type="button"

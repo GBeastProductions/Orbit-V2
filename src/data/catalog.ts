@@ -44,7 +44,6 @@ import {
 import { SONG_CHARTS } from './songCharts';
 import { DAILY_WEEKLY_CHARTS } from './dailyWeeklyCharts';
 
-export const DEV_PASSCODE = 'RainbowBrite38@*';
 export const STORAGE_KEY = 'orbit_rhythm_v10';
 export const NEEDLE_TOLERANCE = 0.025;
 
@@ -181,6 +180,57 @@ export const CHASSIS_THEMES: Record<ThemeId, ChassisTheme> = {
     hubActiveFill: '#071a29',
     onPrimary: '#04121d',
     bgAccentRgb: '56, 189, 248',
+  },
+  neon_sakura: {
+    id: 'neon_sakura',
+    label: 'Neon Sakura',
+    jpLabel: '夜桜・ネオン桜',
+    orbCost: 0,
+    isTransformationSkin: true,
+    unlockRequirement: 'Score S or SS on any DEMON chart',
+    primary: '#f43f8e',
+    bright: '#fbcfe8',
+    secondary: '#facc15',
+    dim: '#330b20',
+    edgeTick: '#fff1f2',
+    trailSteps: ['#240717', '#4a0f2e', '#7c184c', '#f43f8e'],
+    hubActiveFill: '#1e0814',
+    onPrimary: '#ffffff',
+    bgAccentRgb: '244, 63, 142',
+  },
+  cozy_christmas_2026: {
+    id: 'cozy_christmas_2026',
+    label: 'Cozy Christmas 2026',
+    jpLabel: '聖夜・クリスマス',
+    orbCost: 0,
+    isTransformationSkin: true,
+    unlockRequirement: 'Score S or SS on both Christmas tracks (any difficulty)',
+    primary: '#e11d48',
+    bright: '#fde68a',
+    secondary: '#34d399',
+    dim: '#2e0b16',
+    edgeTick: '#fef3c7',
+    trailSteps: ['#1c090e', '#38101b', '#5d172c', '#e11d48'],
+    hubActiveFill: '#170d12',
+    onPrimary: '#ffffff',
+    bgAccentRgb: '225, 29, 72',
+  },
+  krampusnacht_2026: {
+    id: 'krampusnacht_2026',
+    label: 'Krampusnacht 2026',
+    jpLabel: '降魔聖夜・クランプス',
+    orbCost: 0,
+    isTransformationSkin: true,
+    unlockRequirement: 'Score S or SS on both Christmas tracks on DEMON',
+    primary: '#dc2626',
+    bright: '#fca5a5',
+    secondary: '#f59e0b',
+    dim: '#2b0808',
+    edgeTick: '#fee2e2',
+    trailSteps: ['#1d0505', '#3b0909', '#611010', '#dc2626'],
+    hubActiveFill: '#180506',
+    onPrimary: '#ffffff',
+    bgAccentRgb: '220, 38, 38',
   },
 };
 

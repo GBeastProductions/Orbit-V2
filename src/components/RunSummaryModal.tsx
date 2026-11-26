@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Award, Film, ListMusic, RotateCcw } from 'lucide-react';
+import { Award, Film, ListMusic, RotateCcw, Sparkles } from 'lucide-react';
+import { CHASSIS_THEMES } from '../data/catalog';
 import { computeNextMilestone } from '../engine/beatmap';
-import { RunSummaryData } from '../types/game';
+import { RunSummaryData, ThemeId } from '../types/game';
 import { OrbIcon } from './OrbIcon';
 
 interface RunSummaryModalProps {
@@ -12,6 +13,7 @@ interface RunSummaryModalProps {
   onRetry: () => void;
   onOpenSongSelect: () => void;
   onOpenOrbVault: () => void;
+  onEquipTheme?: (themeId: ThemeId) => void;
 }
 
 const RANK_COLORS: Record<string, string> = {
@@ -31,6 +33,7 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
   onRetry,
   onOpenSongSelect,
   onOpenOrbVault,
+  onEquipTheme,
 }) => {
   if (!summary) return null;
 
@@ -55,21 +58,33 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
   }
   const maxBin = Math.max(1, ...bins);
 
+  const unlockedSkins = summary.newlyUnlockedThemes || [];
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="runSummaryTitle"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/84 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/84 p-4 backdrop-blur-xs"
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto orbit-scroll border border-white/15 bg-[#0b0e16] shadow-2xl"
+        className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto orbit-scroll border shadow-2xl"
+        style={{
+          backgroundColor: 'var(--skin-surface, #0b0e16)',
+          borderColor: 'var(--skin-border, rgba(255,255,255,0.15))',
+        }}
       >
         {/* Top Rank Header */}
-        <div className="flex items-center justify-between gap-4 border-b border-white/10 bg-[#121624] px-6 py-5">
+        <div
+          className="flex items-center justify-between gap-4 border-b px-6 py-5"
+          style={{
+            backgroundColor: 'var(--skin-header, #121624)',
+            borderColor: 'var(--skin-border, rgba(255,255,255,0.12))',
+          }}
+        >
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent-bright)]">
               {summary.cleared ? 'Stage Cleared · クリア' : `Stage Failed · ${summary.missReason || 'Missed'}`}
@@ -122,19 +137,19 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
 
           {/* Judgment Breakdown */}
           <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
-            <div className="border border-white/10 bg-[#101420] p-2.5">
+            <div className="border border-white/10 bg-[#101420]/90 p-2.5">
               <span className="block text-[11px] text-[#a1abbe]">Perfect</span>
               <span className="text-base font-extrabold text-white">{summary.perfectCount}</span>
             </div>
-            <div className="border border-white/10 bg-[#101420] p-2.5">
+            <div className="border border-white/10 bg-[#101420]/90 p-2.5">
               <span className="block text-[11px] text-[#a1abbe]">Great</span>
               <span className="text-base font-extrabold text-[#34d399]">{summary.greatCount}</span>
             </div>
-            <div className="border border-white/10 bg-[#101420] p-2.5">
+            <div className="border border-white/10 bg-[#101420]/90 p-2.5">
               <span className="block text-[11px] text-[#a1abbe]">Good</span>
               <span className="text-base font-extrabold text-[#22d3ee]">{summary.goodCount}</span>
             </div>
-            <div className="border border-white/10 bg-[#101420] p-2.5">
+            <div className="border border-white/10 bg-[#101420]/90 p-2.5">
               <span className="block text-[11px] text-[#a1abbe]">Miss</span>
               <span className="text-base font-extrabold text-[#ef4444]">{summary.missCount}</span>
             </div>
@@ -167,6 +182,54 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
               })}
             </div>
           </div>
+
+          {/* Newly Unlocked Full Transformation Skins */}
+          {unlockedSkins.length > 0 && (
+            <div className="border border-[var(--accent-bright)] bg-[var(--accent-dim)]/65 p-4 shadow-[0_0_24px_rgba(var(--bg-accent-rgb,255,59,130),0.24)]">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-[#fde047]">
+                <Sparkles className="h-4 w-4" />
+                <span>Full-UI Transformation Skin Unlocked</span>
+              </div>
+              <div className="mt-2.5 space-y-2">
+                {unlockedSkins.map((tid) => {
+                  const theme = CHASSIS_THEMES[tid];
+                  if (!theme) return null;
+                  return (
+                    <div
+                      key={tid}
+                      className="flex flex-wrap items-center justify-between gap-3 border border-white/15 bg-black/45 px-3.5 py-2.5"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span
+                          className="h-7 w-7 shrink-0 border border-white/30"
+                          style={{
+                            background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})`,
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <span className="font-display block truncate text-sm font-black text-white">
+                            {theme.label} <span className="text-xs font-semibold text-white/70">· {theme.jpLabel}</span>
+                          </span>
+                          <span className="block truncate text-[11px] text-[#e2e8f0]">
+                            {theme.unlockRequirement}
+                          </span>
+                        </div>
+                      </div>
+                      {onEquipTheme && (
+                        <button
+                          type="button"
+                          onClick={() => onEquipTheme(tid)}
+                          className="tactile-btn lazer-slant-sm shrink-0 border border-[#fde047] bg-[#fde047] px-3.5 py-1.5 text-xs font-black text-[#090b10] hover:bg-white cursor-pointer"
+                        >
+                          <span className="lazer-unslant-sm block">Equip Skin Now</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Newly Unlocked Trophy Badges */}
           {summary.newlyEarnedBadges.length > 0 && (

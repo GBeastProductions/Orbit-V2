@@ -30,8 +30,10 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
   }) => {
     return (
       <header
-        className="relative z-20 flex h-[54px] shrink-0 items-center justify-between gap-4 border-t border-b border-white/12 bg-[#080a11]/92 px-4 sm:px-7 backdrop-blur-md"
+        className="relative z-20 flex h-[54px] shrink-0 items-center justify-between gap-4 border-t border-b px-4 sm:px-7 backdrop-blur-md"
         style={{
+          backgroundColor: 'var(--skin-header, rgba(8, 10, 17, 0.92))',
+          borderBottomColor: 'var(--skin-border, rgba(255, 255, 255, 0.12))',
           borderTopColor: 'var(--accent)',
           boxShadow: '0 4px 24px rgba(0, 0, 0, 0.65)',
         }}
@@ -41,7 +43,11 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
           <button
             type="button"
             onClick={onBackToSongSelect}
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/18 bg-[#121624] px-3.5 py-1.5 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+            className="tactile-btn lazer-slant-sm flex items-center border px-3.5 py-1.5 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+            style={{
+              backgroundColor: 'var(--skin-blade, #121624)',
+              borderColor: 'var(--skin-border, rgba(255,255,255,0.18))',
+            }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -88,7 +94,11 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
             type="button"
             onClick={onQuickRestart}
             title="Quick Restart (R)"
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/18 bg-[#121624] px-2.5 py-1.5 text-xs font-bold text-[#d1d5db] hover:border-[#22d3ee] hover:text-white cursor-pointer whitespace-nowrap"
+            className="tactile-btn lazer-slant-sm flex items-center border px-2.5 py-1.5 text-xs font-bold text-[#d1d5db] hover:border-[#22d3ee] hover:text-white cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: 'var(--skin-blade, #121624)',
+              borderColor: 'var(--skin-border, rgba(255,255,255,0.18))',
+            }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <RotateCcw className="h-3.5 w-3.5 text-[#22d3ee]" />
@@ -98,7 +108,11 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
           <button
             type="button"
             onClick={onOpenMods}
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/18 bg-[#121624] px-3 py-1.5 text-xs font-bold text-[#e5e7eb] hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+            className="tactile-btn lazer-slant-sm flex items-center border px-3 py-1.5 text-xs font-bold text-[#e5e7eb] hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: 'var(--skin-blade, #121624)',
+              borderColor: 'var(--skin-border, rgba(255,255,255,0.18))',
+            }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <SlidersHorizontal className="h-3.5 w-3.5 text-[var(--accent-bright)]" />
@@ -108,7 +122,11 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
           <button
             type="button"
             onClick={onOpenPause}
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/18 bg-[#121624] px-3.5 py-1.5 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+            className="tactile-btn lazer-slant-sm flex items-center border px-3.5 py-1.5 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: 'var(--skin-blade, #121624)',
+              borderColor: 'var(--skin-border, rgba(255,255,255,0.18))',
+            }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <Pause className="h-3.5 w-3.5" />

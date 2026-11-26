@@ -1,0 +1,133 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'studiosmobile092@gmail.com' ||
+        exists(/databases/$(database)/documents/dev_roles/$(request.auth.uid))
+      );
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'theme',
+          'unlockedThemes',
+          'bestScore',
+          'bestStreak',
+          'totalOrbsEarned',
+          'tutorialSongCompleted',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'email',
+          'theme',
+          'unlockedThemes',
+          'bestScore',
+          'bestStreak',
+          'totalOrbsEarned',
+          'tutorialSongCompleted',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.uid == userId
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 80))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 180))
+        && data.theme is string
+        && data.theme.size() >= 1
+        && data.theme.size() <= 32
+        && data.theme.matches('^[a-z0-9_]+$')
+        && data.unlockedThemes is list
+        && data.unlockedThemes.size() >= 1
+        && data.unlockedThemes.size() <= 20
+        && data.unlockedThemes[0] is string
+        && data.bestScore is int
+        && data.bestScore >= 0
+        && data.bestStreak is int
+        && data.bestStreak >= 0
+        && data.totalOrbsEarned is int
+        && data.totalOrbsEarned >= 0
+        && data.tutorialSongCompleted is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /user_profiles/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && (isOwner(userId) || isAdmin())
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName',
+          'email',
+          'theme',
+          'unlockedThemes',
+          'bestScore',
+          'bestStreak',
+          'totalOrbsEarned',
+          'tutorialSongCompleted',
+          'updatedAt'
+        ]);
+
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /dev_roles/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    match /test/connection {
+      allow get: if true;
+      allow list, create, update, delete: if false;
+    }
+  }
+}

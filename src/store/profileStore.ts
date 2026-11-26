@@ -98,8 +98,10 @@ export function loadProfile(): PlayerProfile {
         ...(parsed.tierBestScores || {}),
       },
       songRecords: { ...(parsed.songRecords || {}) },
+      songDiffRecords: { ...(parsed.songDiffRecords || {}) },
       levelBgSettings: { ...(parsed.levelBgSettings || {}) },
       mechanicStats: { ...(parsed.mechanicStats || {}) },
+      devUnlocked: false,
       equippedMods: Array.isArray(parsed.equippedMods)
         ? (parsed.equippedMods.filter((m) => VALID_MODS.includes(m)).slice(0, 3) as ModCode[])
         : [],

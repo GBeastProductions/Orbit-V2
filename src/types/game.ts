@@ -7,7 +7,25 @@ export type ThemeId =
   | 'crimson'
   | 'shinjuku_violet'
   | 'snowflake_frost'
-  | 'kyoto_jade';
+  | 'kyoto_jade'
+  | 'neon_sakura'
+  | 'cozy_christmas_2026'
+  | 'krampusnacht_2026';
+
+export type SkinParticlePreset = 'none' | 'sakura' | 'snow' | 'krampus_ash';
+export type SkinDialStyle = 'classic' | 'sakura_kintsugi' | 'christmas_frost' | 'krampus_forged';
+export type SkinTrimStyle = 'none' | 'sakura_blossom' | 'snow_cap' | 'krampus_iron';
+
+export type UIActionId =
+  | 'play_primary'
+  | 'open_tracks'
+  | 'open_shop'
+  | 'open_index'
+  | 'open_settings'
+  | 'toggle_music'
+  | 'open_mods'
+  | 'open_practice'
+  | 'open_dev_console';
 
 export type HitSfxMode = 'switch' | 'harmonic' | 'rimshot';
 export type BgFxMode = 'dynamic' | 'clean' | 'minimal';
@@ -73,6 +91,8 @@ export interface ChassisTheme {
   label: string;
   jpLabel: string;
   orbCost: number;
+  isTransformationSkin?: boolean;
+  unlockRequirement?: string;
   primary: string;
   bright: string;
   secondary: string;
@@ -82,6 +102,42 @@ export interface ChassisTheme {
   hubActiveFill: string;
   onPrimary: string;
   bgAccentRgb: string;
+}
+
+export interface SkinSlotOverlay {
+  id: string;
+  slot: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight' | 'turntable' | 'headerAccent';
+  imageUrl: string;
+  opacity: number;
+  scale?: number;
+  rotateDeg?: number;
+  flipX?: boolean;
+  blendMode?: 'screen' | 'lighten' | 'normal';
+}
+
+export interface SkinPackManifest {
+  id: ThemeId;
+  name: string;
+  subtitle: string;
+  isFullTransformation: boolean;
+  unlockRuleText: string;
+  displayFont: string;
+  bodyFont: string;
+  monoFont: string;
+  backdropImageUrl: string | null;
+  backdropScrimRgba: string;
+  surfaceBg: string;
+  surfaceElevatedBg: string;
+  surfaceBorder: string;
+  headerBg: string;
+  bladeBg: string;
+  bladeHoverBg: string;
+  trimStyle: SkinTrimStyle;
+  particlePreset: SkinParticlePreset;
+  dialStyle: SkinDialStyle;
+  turntableGlowCss: string;
+  ornamentImageUrl: string | null;
+  overlays: SkinSlotOverlay[];
 }
 
 export interface DifficultyConfig {
@@ -313,6 +369,7 @@ export interface PlayerProfile {
   bestScore: number;
   tierBestScores: Record<DifficultyId, number>;
   songRecords: Record<string, SongRecord>;
+  songDiffRecords?: Record<string, Partial<Record<DifficultyId, SongRecord>>>;
   bestStreak: number;
   totalHits: number;
   totalMisses: number;
@@ -358,6 +415,7 @@ export interface RunSummaryData {
   cashedOutOrbs: number;
   cashOutApproved: boolean;
   newlyEarnedBadges: TrophyBadge[];
+  newlyUnlockedThemes?: ThemeId[];
   missReason?: string;
   missDegrees?: string;
   isNewBest: boolean;

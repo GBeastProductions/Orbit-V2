@@ -2,23 +2,43 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
+  Cloud,
   Keyboard,
+  LogIn,
+  LogOut,
   Monitor,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   Volume2,
 } from 'lucide-react';
 import { CHASSIS_THEMES } from '../data/catalog';
+import { getSkinPack } from '../data/skinManifests';
 import { BgFxMode, HitSfxMode, OverdriveVfxMode, PlayerProfile, ThemeId } from '../types/game';
 import { ArcadeSwitch } from './LazerChrome';
 import { CalibrationWizard } from './CalibrationWizard';
 import { OrbIcon } from './OrbIcon';
+import { SkinBladeTrim } from './SkinAtmosphere';
 
 type SettingsSection = 'controls' | 'audio' | 'display' | 'profile';
+
+export interface AuthAccountSummary {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
 
 interface SettingsScreenProps {
   profile: PlayerProfile;
   listeningSlot: 0 | 1 | 2;
+  authUser: AuthAccountSummary | null;
+  authLoading: boolean;
+  authError: string | null;
+  isDeveloper: boolean;
+  onGoogleSignIn: () => void;
+  onGoogleSignOut: () => void;
+  onToggleDevUnlock: () => void;
   onStartRebind: (slot: 1 | 2) => void;
   onBackToTitle: () => void;
   onTogglePointer: () => void;
@@ -33,7 +53,6 @@ interface SettingsScreenProps {
   onSelectBgFx: (mode: BgFxMode) => void;
   onSelectOverdriveVfx: (mode: OverdriveVfxMode) => void;
   onOpenShop: () => void;
-  onDevUnlock: (code: string) => boolean;
   onResetCareer: () => void;
   onResetDefaults: () => void;
   onTestTick: () => void;
@@ -42,13 +61,20 @@ interface SettingsScreenProps {
 const SECTIONS: { id: SettingsSection; label: string; sub: string; Icon: React.FC<{ className?: string }> }[] = [
   { id: 'controls', label: 'Controls & Input', sub: 'Trigger keys & live key test', Icon: Keyboard },
   { id: 'audio', label: 'Audio & Calibration', sub: 'Volumes, hit SFX & ms offset', Icon: Volume2 },
-  { id: 'display', label: 'Display & Themes', sub: 'Cabinet glow & stage FX', Icon: Monitor },
-  { id: 'profile', label: 'Profile & Unlocks', sub: 'Save reset & passcode', Icon: ShieldCheck },
+  { id: 'display', label: 'Display & Themes', sub: 'Cabinet skins & stage FX', Icon: Monitor },
+  { id: 'profile', label: 'Account & Roles', sub: 'Google Sign-In & dev access', Icon: ShieldCheck },
 ];
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   profile,
   listeningSlot,
+  authUser,
+  authLoading,
+  authError,
+  isDeveloper,
+  onGoogleSignIn,
+  onGoogleSignOut,
+  onToggleDevUnlock,
   onStartRebind,
   onBackToTitle,
   onTogglePointer,
@@ -63,15 +89,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onSelectBgFx,
   onSelectOverdriveVfx,
   onOpenShop,
-  onDevUnlock,
   onResetCareer,
   onResetDefaults,
   onTestTick,
 }) => {
+  const skin = getSkinPack(profile.theme);
   const [section, setSection] = useState<SettingsSection>('controls');
   const [pressedTest, setPressedTest] = useState<'k1' | 'k2' | null>(null);
-  const [passInput, setPassInput] = useState('');
-  const [passStatus, setPassStatus] = useState('');
   const [tapCalTimes, setTapCalTimes] = useState<number[]>([]);
   const tapResetTimerRef = useRef<number | null>(null);
 
@@ -131,16 +155,30 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#07080d]/95 via-[#090d17]/88 to-[#07080d]/95"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background: `linear-gradient(135deg, ${skin.backdropScrimRgba} 0%, rgba(9,13,23,0.68) 50%, ${skin.backdropScrimRgba} 100%)`,
+        }}
       />
 
       {/* Top 3-Zone Header */}
-      <header className="relative z-20 flex h-[60px] shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-[#080a11]/92 px-4 sm:px-8">
+      <header
+        className="relative z-20 flex h-[60px] shrink-0 items-center justify-between gap-4 border-b px-4 sm:px-8"
+        style={{
+          backgroundColor: skin.headerBg,
+          borderColor: skin.surfaceBorder,
+        }}
+      >
+        <SkinBladeTrim themeId={profile.theme} />
         <div className="flex items-center gap-3 sm:gap-4">
           <button
             type="button"
             onClick={onBackToTitle}
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/15 bg-[#121624] px-3.5 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+            className="tactile-btn lazer-slant-sm flex items-center border px-3.5 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: skin.bladeBg,
+              borderColor: skin.surfaceBorder,
+            }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -161,7 +199,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <button
             type="button"
             onClick={onResetDefaults}
-            className="tactile-btn lazer-slant-sm border border-white/15 bg-[#121624] px-3.5 py-2 text-xs font-semibold text-[#d1d5db] hover:border-white/35 hover:text-white cursor-pointer whitespace-nowrap"
+            className="tactile-btn lazer-slant-sm border px-3.5 py-2 text-xs font-semibold text-[#d1d5db] hover:border-white/35 hover:text-white cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: skin.bladeBg,
+              borderColor: skin.surfaceBorder,
+            }}
           >
             <span className="lazer-unslant-sm block">Restore Defaults</span>
           </button>
@@ -183,12 +225,21 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => setSection(item.id)}
-                className={`tactile-btn lazer-slant-sm flex shrink-0 items-center justify-between gap-3 border px-3.5 py-2 text-left cursor-pointer lg:w-full lg:px-4 lg:py-3 ${
+                className={`tactile-btn lazer-slant-sm relative flex shrink-0 items-center justify-between gap-3 border px-3.5 py-2 text-left cursor-pointer lg:w-full lg:px-4 lg:py-3 ${
                   active
                     ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)] shadow-[0_8px_28px_rgba(var(--bg-accent-rgb,255,59,130),0.24)]'
-                    : 'border-white/12 bg-[#101420]/90 text-white hover:border-white/30 hover:bg-[#161c2e]'
+                    : 'text-white hover:border-white/30'
                 }`}
+                style={
+                  active
+                    ? undefined
+                    : {
+                        backgroundColor: skin.bladeBg,
+                        borderColor: skin.surfaceBorder,
+                      }
+                }
               >
+                {active && <SkinBladeTrim themeId={profile.theme} />}
                 <span className="lazer-unslant-sm flex items-center gap-2.5 lg:gap-3 min-w-0">
                   <Icon
                     className={`h-4 w-4 shrink-0 ${
@@ -214,7 +265,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </nav>
 
         {/* Right Workbench */}
-        <section className="orbit-scroll flex-1 overflow-y-auto border border-white/12 bg-[#0d111b]/95 p-5 sm:p-7 lg:col-span-8">
+        <section
+          className="orbit-scroll flex-1 overflow-y-auto border p-5 sm:p-7 lg:col-span-8"
+          style={{
+            backgroundColor: skin.surfaceBg,
+            borderColor: skin.surfaceBorder,
+          }}
+        >
           {section === 'controls' && (
             <div className="space-y-6">
               <div>
@@ -490,7 +547,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                     const t = CHASSIS_THEMES[tid];
                     const owned =
                       profile.devUnlocked ||
-                      t.orbCost === 0 ||
+                      (!t.isTransformationSkin && t.orbCost === 0) ||
                       profile.unlockedThemes.includes(tid);
                     const active = profile.theme === tid;
 
@@ -500,7 +557,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                         type="button"
                         disabled={!owned}
                         onClick={() => onSelectTheme(tid)}
-                        className={`tactile-btn flex flex-col gap-2 border p-3 text-left cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                        className={`tactile-btn flex flex-col gap-2 border p-3 text-left cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
                           active
                             ? 'border-[var(--accent-bright)] bg-[#181f33]'
                             : 'border-white/10 bg-[#121726] hover:border-white/30'
@@ -509,18 +566,28 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                         <div className="flex items-center justify-between">
                           <span
                             className="h-4 w-8 border border-white/25"
-                            style={{ backgroundColor: t.primary }}
+                            style={{
+                              background: t.isTransformationSkin
+                                ? `linear-gradient(135deg, ${t.primary}, ${t.secondary})`
+                                : t.primary,
+                            }}
                           />
-                          {active && (
+                          {active ? (
                             <span className="text-[10px] font-extrabold text-[var(--accent-bright)]">
                               ACTIVE
                             </span>
-                          )}
+                          ) : t.isTransformationSkin ? (
+                            <Sparkles className="h-3.5 w-3.5 text-[#fde047]" />
+                          ) : null}
                         </div>
                         <div className="min-w-0">
                           <span className="block truncate text-xs font-bold text-white">{t.label}</span>
                           <span className="block truncate text-[10px] text-[#a1abbe]">
-                            {owned ? t.jpLabel : `${t.orbCost} Orbs`}
+                            {owned
+                              ? t.jpLabel
+                              : t.isTransformationSkin
+                              ? t.unlockRequirement || 'Skill Milestone'
+                              : `${t.orbCost} Orbs`}
                           </span>
                         </div>
                       </button>
@@ -535,37 +602,100 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div className="space-y-6">
               <div>
                 <h2 className="font-display text-xl font-black text-white">
-                  Profile Maintenance &amp; Developer Access
+                  Account Sync &amp; Developer Role Access
                 </h2>
                 <p className="mt-1 text-xs text-[#a1abbe]">
-                  Manage local arcade save state or unlock all tracks, tiers, themes, and mods for testing.
+                  Sign in with Google to back up your Orbit records and unlock Themes across devices. Developer sandbox access is verified by role rather than client passcodes.
                 </p>
               </div>
 
-              <div className="border border-white/12 bg-[#121726] p-4">
-                <span className="block text-sm font-bold text-white mb-2">
-                  Developer Unlock Passcode
-                </span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={passInput}
-                    onChange={(e) => setPassInput(e.target.value)}
-                    placeholder="Enter passcode..."
-                    className="flex-1 border border-white/15 bg-[#07080d] px-3 py-2 text-xs text-white outline-none focus:border-[var(--accent-bright)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ok = onDevUnlock(passInput);
-                      setPassStatus(ok ? 'All tracks, mods, and themes unlocked.' : 'Invalid passcode.');
-                    }}
-                    className="tactile-btn border border-white/20 bg-[#181f33] px-4 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer"
-                  >
-                    Unlock
-                  </button>
+              {/* Google Account Card */}
+              <div className="border border-white/12 bg-[#121726] p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {authUser?.photoURL ? (
+                      <img
+                        src={authUser.photoURL}
+                        alt={authUser.displayName || 'Account avatar'}
+                        referrerPolicy="no-referrer"
+                        className="h-11 w-11 shrink-0 border border-white/25 object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center border border-white/15 bg-[#181f33]">
+                        <Cloud className="h-5 w-5 text-[#22d3ee]" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <span className="block truncate text-sm font-bold text-white">
+                        {authUser ? authUser.displayName || 'Orbit Account' : 'Not Signed In'}
+                      </span>
+                      <span className="block truncate text-xs text-[#a1abbe]">
+                        {authUser
+                          ? `${authUser.email || 'Signed in'} · Cloud Backup Active`
+                          : 'Sign in with Google to sync Orbs, unlocked skins, and stats'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {authUser ? (
+                    <button
+                      type="button"
+                      disabled={authLoading}
+                      onClick={onGoogleSignOut}
+                      className="tactile-btn flex items-center gap-2 border border-white/20 bg-[#181f33] px-4 py-2 text-xs font-bold text-white hover:border-[#ef4444] cursor-pointer disabled:opacity-50"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      <span>Sign Out</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={authLoading}
+                      onClick={onGoogleSignIn}
+                      className="tactile-btn lazer-slant-sm flex items-center border border-[var(--accent-bright)] bg-[var(--accent)] px-4 py-2 text-xs font-black text-[var(--accent-on)] hover:bg-[var(--accent-bright)] cursor-pointer disabled:opacity-50"
+                    >
+                      <span className="lazer-unslant-sm flex items-center gap-2">
+                        <LogIn className="h-3.5 w-3.5" />
+                        <span>{authLoading ? 'Connecting...' : 'Sign in with Google'}</span>
+                      </span>
+                    </button>
+                  )}
                 </div>
-                {passStatus && <p className="mt-2 text-xs text-[#22d3ee]">{passStatus}</p>}
+
+                {authError && (
+                  <p className="border border-[#ef4444]/40 bg-[#2a0e14] px-3 py-2 text-xs text-[#fecaca]">
+                    {authError}
+                  </p>
+                )}
+              </div>
+
+              {/* Role-Gated Developer Sandbox Panel */}
+              <div className="border border-white/12 bg-[#121726] p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-white">Developer Sandbox Mode</span>
+                      <span
+                        className={`border px-2 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                          isDeveloper
+                            ? 'border-[#34d399]/50 bg-[#0b261c] text-[#34d399]'
+                            : 'border-white/15 bg-[#090c14] text-[#808ba1]'
+                        }`}
+                      >
+                        {isDeveloper ? 'Verified Developer' : 'Player Role'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[#a1abbe]">
+                      {isDeveloper
+                        ? 'Your signed-in account holds Developer privileges. Toggle full access to preview locked tracks, difficulties, mods, and Transformation Skins.'
+                        : 'Sign in with an authorized Developer account to unlock Sandbox preview controls and Phase 6 Studio tools.'}
+                    </p>
+                  </div>
+
+                  {isDeveloper && (
+                    <ArcadeSwitch checked={profile.devUnlocked} onToggle={onToggleDevUnlock} />
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-4 border border-[#ef4444]/30 bg-[#1a0b0e] p-4">

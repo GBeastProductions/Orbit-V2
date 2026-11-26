@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Award, BarChart3, BookOpen, Check, Crown, Lock, Play, Snowflake } from 'lucide-react';
 import { BADGE_CATALOG, WAVE_MODES } from '../data/catalog';
+import { getSkinPack } from '../data/skinManifests';
 import { computeMasteryPrestige, TAU } from '../engine/beatmap';
 import { PlayerProfile, SongDefinition, WaveModeId, WaveModeInfo } from '../types/game';
 import { OrbIcon } from './OrbIcon';
+import { SkinBladeTrim } from './SkinAtmosphere';
 
 type IndexTab = 'book' | 'trophies' | 'telemetry';
 
@@ -229,6 +231,7 @@ export const IndexScreen: React.FC<IndexScreenProps> = ({
     (s) => profile.songRecords[s.id] && profile.songRecords[s.id].bestRank !== 'F',
   ).length;
   const prestige = computeMasteryPrestige(profile, songs);
+  const skin = getSkinPack(profile.theme);
 
   return (
     <motion.div
@@ -239,16 +242,26 @@ export const IndexScreen: React.FC<IndexScreenProps> = ({
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#07090f]/95 via-[#0b101b]/92 to-[#07080d]/95"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background: skin.isFullTransformation
+            ? `linear-gradient(135deg, ${skin.backdropScrimRgba} 0%, rgba(7,8,13,0.72) 55%, ${skin.backdropScrimRgba} 100%)`
+            : 'linear-gradient(135deg, rgba(7,9,15,0.95) 0%, rgba(11,16,27,0.92) 50%, rgba(7,8,13,0.95) 100%)',
+        }}
       />
 
       {/* Top 3-Zone Header */}
-      <header className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-b border-white/10 bg-[#080a11]/92 px-4 py-2.5 sm:px-8">
+      <header
+        className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-b px-4 py-2.5 sm:px-8 backdrop-blur-md"
+        style={{ backgroundColor: skin.headerBg, borderColor: skin.surfaceBorder }}
+      >
+        <SkinBladeTrim themeId={profile.theme} />
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className="tactile-btn lazer-slant-sm flex items-center border border-white/15 bg-[#121624] px-3.5 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+            className="tactile-btn lazer-slant-sm flex items-center border px-3.5 py-2 text-xs font-bold text-white hover:border-[var(--accent-bright)] cursor-pointer whitespace-nowrap shrink-0"
+            style={{ backgroundColor: skin.bladeBg, borderColor: skin.surfaceBorder }}
           >
             <span className="lazer-unslant-sm flex items-center gap-1.5">
               <ArrowLeft className="h-3.5 w-3.5" />

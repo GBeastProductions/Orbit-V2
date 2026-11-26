@@ -1,10 +1,13 @@
 import React from 'react';
-import { BgFxMode, LevelBackgroundSetting } from '../types/game';
+import { getSkinPack } from '../data/skinManifests';
+import { BgFxMode, LevelBackgroundSetting, ThemeId } from '../types/game';
 
 interface BackgroundBackdropProps {
   defaultImageUrl: string;
   levelSetting?: LevelBackgroundSetting;
   bgFxMode: BgFxMode;
+  themeId: ThemeId;
+  preferSkinBackdrop?: boolean;
   forceDimPct?: number;
   forceBlurPx?: number;
   accentRgb?: string;
@@ -15,13 +18,35 @@ export const BackgroundBackdrop: React.FC<BackgroundBackdropProps> = React.memo(
     defaultImageUrl,
     levelSetting,
     bgFxMode,
+    themeId,
+    preferSkinBackdrop = false,
     forceDimPct,
     forceBlurPx,
     accentRgb = '255, 59, 130',
   }) => {
-    const imageSrc = levelSetting?.customImageDataUrl || defaultImageUrl;
-    const dimPct = forceDimPct !== undefined ? forceDimPct : levelSetting?.dimPct ?? 64;
-    const blurPx = forceBlurPx !== undefined ? forceBlurPx : levelSetting?.blurPx ?? 3;
+    const skin = getSkinPack(themeId);
+    const hasCustomTrackArt = Boolean(levelSetting?.customImageDataUrl);
+    const useSkinScene =
+      skin.isFullTransformation &&
+      Boolean(skin.backdropImageUrl) &&
+      (preferSkinBackdrop || !hasCustomTrackArt);
+
+    const imageSrc = useSkinScene
+      ? skin.backdropImageUrl || defaultImageUrl
+      : levelSetting?.customImageDataUrl || defaultImageUrl;
+
+    const dimPct =
+      forceDimPct !== undefined
+        ? forceDimPct
+        : useSkinScene
+        ? 44
+        : levelSetting?.dimPct ?? 64;
+    const blurPx =
+      forceBlurPx !== undefined
+        ? forceBlurPx
+        : useSkinScene
+        ? 0
+        : levelSetting?.blurPx ?? 3;
 
     return (
       <div
@@ -48,21 +73,28 @@ export const BackgroundBackdrop: React.FC<BackgroundBackdropProps> = React.memo(
 
         {/* Measured readability scrim */}
         <div
-          className="absolute inset-0 bg-[#07080d] transition-opacity duration-200"
-          style={{ opacity: Math.min(0.96, Math.max(0.2, dimPct / 100)) }}
+          className="absolute inset-0 transition-opacity duration-200"
+          style={{
+            backgroundColor: skin.isFullTransformation ? 'rgba(9, 6, 12, 1)' : '#07080d',
+            opacity: Math.min(0.96, Math.max(0.18, dimPct / 100)),
+          }}
         />
 
-        {/* Subtle 90s Tokyo disco ambient floor wash + CRT scanlines */}
+        {/* Dynamic ambiance: classic disco grid OR transformation atmospheric aura */}
         {bgFxMode === 'dynamic' && (
           <>
             <div
               className="absolute inset-0"
               style={{
-                background: `radial-gradient(circle at 26% 52%, rgba(${accentRgb}, 0.16) 0%, rgba(34, 211, 238, 0.06) 44%, transparent 78%)`,
+                background: `radial-gradient(circle at 26% 52%, rgba(${accentRgb}, 0.16) 0%, rgba(34, 211, 238, 0.05) 44%, transparent 78%)`,
               }}
             />
-            <div className="disco-grid absolute inset-0 opacity-35" />
-            <div className="tokyo-scanlines absolute inset-0 opacity-55" />
+            {!skin.isFullTransformation && (
+              <>
+                <div className="disco-grid absolute inset-0 opacity-35" />
+                <div className="tokyo-scanlines absolute inset-0 opacity-55" />
+              </>
+            )}
           </>
         )}
       </div>

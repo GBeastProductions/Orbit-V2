@@ -17,6 +17,13 @@
   --theme-on-primary: #ffffff;
   --theme-secondary: #22d3ee;
 
+  --skin-surface: rgba(13, 17, 27, 0.92);
+  --skin-surface-elevated: rgba(20, 26, 40, 0.95);
+  --skin-border: rgba(255, 255, 255, 0.14);
+  --skin-header: rgba(8, 10, 17, 0.92);
+  --skin-blade: rgba(16, 20, 32, 0.92);
+  --skin-blade-hover: rgba(23, 29, 46, 0.96);
+
   --accent: var(--theme-primary);
   --accent-bright: var(--theme-bright);
   --accent-dim: var(--theme-dim);

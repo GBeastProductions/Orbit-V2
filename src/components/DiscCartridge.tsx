@@ -1,10 +1,13 @@
 import React from 'react';
 import { Disc3, Lock } from 'lucide-react';
+import { getSkinPack } from '../data/skinManifests';
+import { ThemeId } from '../types/game';
 
 interface DiscCartridgeProps {
   imageUrl: string;
   num: string;
   title: string;
+  themeId?: ThemeId;
   size?: 'sm' | 'md' | 'hero';
   spinning?: boolean;
   locked?: boolean;
@@ -19,12 +22,13 @@ const SIZE_MAP: Record<'sm' | 'md' | 'hero', string> = {
 };
 
 /**
- * 90s Tokyo Disco Vinyl / Optical Turntable Disc centerpiece.
+ * Vinyl / Optical Turntable Disc centerpiece, dynamically framed by the active Transformation Skin Pack.
  */
 export const DiscCartridge: React.FC<DiscCartridgeProps> = ({
   imageUrl,
   num,
   title,
+  themeId = 'tokyo_pink',
   size = 'md',
   spinning = false,
   locked = false,
@@ -32,6 +36,10 @@ export const DiscCartridge: React.FC<DiscCartridgeProps> = ({
   className = '',
 }) => {
   const isHero = size === 'hero';
+  const skin = getSkinPack(themeId);
+  const turntableOverlay = isHero
+    ? skin.overlays.find((o) => o.slot === 'turntable')
+    : undefined;
 
   return (
     <div
@@ -41,23 +49,25 @@ export const DiscCartridge: React.FC<DiscCartridgeProps> = ({
         transition: 'transform 140ms cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
-      {/* Subtle Turntable Neon Glow Aura (inset-0 so it never overflows button box) */}
+      {/* Turntable Outer Glow Aura (skin-driven) */}
       {isHero && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 rounded-full"
           style={{
-            boxShadow:
-              '0 0 54px rgba(var(--bg-accent-rgb, 255, 59, 130), 0.24), inset 0 0 0 1px rgba(255,255,255,0.12)',
+            boxShadow: skin.turntableGlowCss,
           }}
         />
       )}
 
       {/* Rotating Vinyl / Optical Platter */}
       <div
-        className={`relative h-full w-full overflow-hidden rounded-full border border-white/25 bg-[#0a0c13] shadow-2xl ${
+        className={`relative h-full w-full overflow-hidden rounded-full border bg-[#0a0c13] shadow-2xl ${
           spinning ? 'animate-vinyl-cw' : ''
         }`}
+        style={{
+          borderColor: skin.isFullTransformation ? skin.surfaceBorder : 'rgba(255,255,255,0.25)',
+        }}
       >
         {/* Subtle holographic CD / vinyl groove sheen */}
         <div
@@ -65,7 +75,13 @@ export const DiscCartridge: React.FC<DiscCartridgeProps> = ({
           className="pointer-events-none absolute inset-0 rounded-full opacity-45"
           style={{
             background:
-              'conic-gradient(from 35deg, transparent 0deg, rgba(255,255,255,0.24) 30deg, transparent 68deg, rgba(34,211,238,0.22) 140deg, transparent 210deg, rgba(255,59,130,0.24) 280deg, transparent 360deg)',
+              themeId === 'neon_sakura'
+                ? 'conic-gradient(from 35deg, transparent 0deg, rgba(250,204,21,0.34) 30deg, transparent 85deg, rgba(244,63,142,0.34) 170deg, transparent 245deg, rgba(251,207,232,0.28) 310deg, transparent 360deg)'
+                : themeId === 'cozy_christmas_2026'
+                ? 'conic-gradient(from 35deg, transparent 0deg, rgba(253,230,138,0.34) 40deg, transparent 105deg, rgba(52,211,153,0.28) 185deg, transparent 265deg, rgba(225,29,72,0.3) 320deg, transparent 360deg)'
+                : themeId === 'krampusnacht_2026'
+                ? 'conic-gradient(from 35deg, transparent 0deg, rgba(220,38,38,0.42) 38deg, transparent 100deg, rgba(245,158,11,0.3) 190deg, transparent 275deg, rgba(254,202,202,0.22) 325deg, transparent 360deg)'
+                : 'conic-gradient(from 35deg, transparent 0deg, rgba(255,255,255,0.24) 30deg, transparent 68deg, rgba(34,211,238,0.22) 140deg, transparent 210deg, rgba(255,59,130,0.24) 280deg, transparent 360deg)',
           }}
         />
 
@@ -97,11 +113,44 @@ export const DiscCartridge: React.FC<DiscCartridgeProps> = ({
         </div>
       </div>
 
+      {/* Bespoke Theme Bezel / Crest Overlay (Sakura blossoms, Christmas bow+bell, Krampus chains+bell) */}
+      {isHero && turntableOverlay && (
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute z-10 ${
+            themeId === 'neon_sakura'
+              ? '-inset-7'
+              : '-top-10 left-1/2 -translate-x-1/2 h-44 w-44 sm:h-52 sm:w-52'
+          }`}
+          style={{
+            opacity: turntableOverlay.opacity,
+            mixBlendMode: turntableOverlay.blendMode || 'screen',
+            maskImage: 'radial-gradient(circle at center, black 55%, transparent 82%)',
+            WebkitMaskImage: 'radial-gradient(circle at center, black 55%, transparent 82%)',
+          }}
+        >
+          <img
+            src={turntableOverlay.imageUrl}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-contain"
+            style={{
+              transform: `rotate(${turntableOverlay.rotateDeg ?? 0}deg) scale(${
+                themeId === 'neon_sakura' ? 1.06 : 1.0
+              })`,
+            }}
+          />
+        </div>
+      )}
+
       {/* Stationary Machined Center Spindle */}
       <div
-        className={`pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-[#090b10] shadow-inner ${
+        className={`pointer-events-none absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-[#090b10] shadow-inner ${
           isHero ? 'h-[25%] w-[25%]' : 'h-[31%] w-[31%]'
         }`}
+        style={{
+          borderColor: skin.isFullTransformation ? skin.surfaceBorder : 'rgba(255,255,255,0.3)',
+        }}
       >
         <div className="flex flex-col items-center justify-center text-center">
           <span
