@@ -1,4 +1,5 @@
 import { BADGE_CATALOG, DIFFICULTIES, MOD_CATALOG } from '../data/catalog';
+import { DAILY_WEEKLY_CHARTS } from '../data/dailyWeeklyCharts';
 import { SONG_CHARTS } from '../data/songCharts';
 import {
   BeatmapNote,
@@ -10,6 +11,7 @@ import {
   PlayerProfile,
   SongDefinition,
   SongSection,
+  StackedNoteLayer,
   TrophyBadge,
   WaveModeId,
 } from '../types/game';
@@ -236,10 +238,15 @@ function pickMusicalModeForAnchor(
     }
     if (index === 4) return { modeId: coreFlip };
     if (gapToNextSec >= 1.3 && index % 5 === 2) {
-      return { modeId: 'HOLD_ARC', holdDurationSec: Number(Math.min(1.2, gapToNextSec - 0.44)).toFixed(2) as unknown as number };
+      return { modeId: 'HOLD_ARC', holdDurationSec: Number(Math.min(1.2, gapToNextSec - 0.44).toFixed(2)) };
     }
     if (section === 'DROP' && index % 4 === 3) return { modeId: coreFlip };
     return { modeId: coreCw };
+  }
+
+  // Polarity Chaos (DR) flips spin cadence frequently mid-phrase
+  if (equippedMods.includes('DR') && index % 2 === 1 && index > 0 && gapToNextSec >= 0.46) {
+    return { modeId: index % 4 === 1 ? coreFlip : coreCw };
   }
 
   // Portal Link mod during breakdowns
@@ -252,6 +259,11 @@ function pickMusicalModeForAnchor(
     return { modeId: 'GHOST_PULSE' };
   }
 
+  // Hyper Drift (VD) weaves dynamic BRAKE_DRIFT accelerations into drops
+  if (equippedMods.includes('VD') && section === 'DROP' && index % 4 === 2) {
+    return { modeId: 'BRAKE_DRIFT' };
+  }
+
   // Fever Spinner on Build-Up -> Drop transitions (Hard+ or Overclock) with guaranteed room before drop
   const isDropTransition = prevSection === 'BUILD-UP' && section === 'DROP';
   if (
@@ -259,7 +271,7 @@ function pickMusicalModeForAnchor(
     (diffId === 'HARD' || diffId === 'INSANE' || diffId === 'DEMON' || equippedMods.includes('OC')) &&
     gapToNextSec >= 1.25
   ) {
-    return { modeId: 'FEVER_SPINNER', holdDurationSec: Number(Math.min(1.6, gapToNextSec - 0.34)).toFixed(2) as unknown as number };
+    return { modeId: 'FEVER_SPINNER', holdDurationSec: Number(Math.min(1.6, gapToNextSec - 0.34).toFixed(2)) };
   }
 
   // Natural Hold Arc when music opens up between beats — always leave >= 0.38s breathing room after release
@@ -313,7 +325,7 @@ function pickMusicalModeForAnchor(
       return { modeId: chosen, burstCount: chosen === 'BEAT_BURST' ? 3 : undefined };
     }
     if (section === 'BUILD-UP' && index % 5 === 3 && gapToNextSec >= 1.15) {
-      return { modeId: 'FEVER_SPINNER', holdDurationSec: Number(Math.min(1.35, gapToNextSec - 0.32)).toFixed(2) as unknown as number };
+      return { modeId: 'FEVER_SPINNER', holdDurationSec: Number(Math.min(1.35, gapToNextSec - 0.32).toFixed(2)) };
     }
     const calmPool: WaveModeId[] = [
       coreCw,
@@ -356,7 +368,7 @@ function pickMusicalModeForAnchor(
       modeId: chosen,
       holdDurationSec:
         chosen === 'FEVER_SPINNER'
-          ? Number(Math.min(1.25, gapToNextSec - 0.32)).toFixed(2) as unknown as number
+          ? Number(Math.min(1.25, gapToNextSec - 0.32).toFixed(2))
           : undefined,
     };
   }
@@ -383,7 +395,7 @@ function pickMusicalModeForAnchor(
   }
 
   if (section === 'BUILD-UP' && index % 6 === 4 && gapToNextSec >= 1.15) {
-    return { modeId: 'FEVER_SPINNER', holdDurationSec: Number(Math.min(1.2, gapToNextSec - 0.32)).toFixed(2) as unknown as number };
+    return { modeId: 'FEVER_SPINNER', holdDurationSec: Number(Math.min(1.2, gapToNextSec - 0.32).toFixed(2)) };
   }
 
   const demonVersePool: WaveModeId[] = [
@@ -528,6 +540,247 @@ function computeDynamicNoteDynamics(
 }
 
 /**
+ * Computes total earnable Perfect-unit hits across a beatmap (including multi-tap & stacked modes)
+ * so 45% Overdrive threshold scales fairly to every track and difficulty.
+ */
+export function countBeatmapPerfectUnits(notes: BeatmapNote[]): number {
+  let total = 0;
+  const unitsForMode = (modeId: WaveModeId, burstCount?: number): number => {
+    if (modeId === 'DOUBLE_TAP') return 2;
+    if (modeId === 'BEAT_BURST') return Math.max(2, burstCount || 3);
+    if (modeId === 'METEOR_SLASH') return 2;
+    if (modeId === 'ORDERED_SEQ') return 3;
+    if (modeId === 'MULTI_CLUSTER' || modeId === 'CASCADE_CHAIN') return 2;
+    if (modeId === 'HOLD_ARC') return 2;
+    return 1;
+  };
+  for (const n of notes) {
+    total += unitsForMode(n.modeId, n.burstCount);
+    if (n.stackedModes && n.stackedModes.length > 0) {
+      for (const layer of n.stackedModes) {
+        total += layer.taps ?? unitsForMode(layer.modeId);
+      }
+    }
+  }
+  return Math.max(8, total);
+}
+
+/**
+ * Handcrafted full-song choreography + safe simultaneous stacked gametype builder
+ * specifically tuned for Daily (Days 1-10) and Weekly Demon (W1-W5) rotation tracks.
+ */
+function choreographDailyWeeklyNote(
+  song: SongDefinition,
+  diffId: DifficultyId,
+  section: SongSection,
+  prevSection: SongSection,
+  index: number,
+  relEnergy: number,
+  gapToNextSec: number,
+  beatDur: number,
+  equippedMods: ModCode[],
+): {
+  modeId: WaveModeId;
+  holdDurationSec?: number;
+  burstCount?: number;
+  stackedModes?: StackedNoteLayer[];
+} {
+  const mirror = equippedMods.includes('MR');
+  const coreCw: WaveModeId = mirror ? 'CCW_RED' : 'CW_GREEN';
+  const coreFlip: WaveModeId = mirror ? 'CW_GREEN' : 'CCW_RED';
+
+  if (equippedMods.includes('SD')) {
+    if (gapToNextSec >= 1.25 && index % 5 === 2) {
+      return { modeId: 'HOLD_ARC', holdDurationSec: Number(Math.min(1.35, gapToNextSec * 0.58).toFixed(2)) };
+    }
+    return { modeId: 'ONE_PASS' };
+  }
+
+  // Treat high relative energy surges as DROP phrasing even on long melodic builds
+  const effectiveSec: SongSection =
+    relEnergy >= 0.72 && section !== 'OUTRO'
+      ? 'DROP'
+      : prevSection === 'INTRO' && relEnergy >= 0.45 && section === 'INTRO'
+      ? 'BUILD-UP'
+      : section;
+
+  const isWeekly = Boolean(song.isWeekly);
+  const canSlash = gapToNextSec >= 0.64;
+  const canStack =
+    !song.chillOnly &&
+    (diffId === 'NORMAL' || diffId === 'HARD' || diffId === 'INSANE' || diffId === 'DEMON') &&
+    gapToNextSec >= (diffId === 'NORMAL' ? 0.92 : 0.72);
+  const phraseIdx = index % 16;
+
+  // Fever Spinner on peak Build-Up transitions or pre-drop rises
+  if (
+    ((prevSection !== 'DROP' && effectiveSec === 'DROP') ||
+      (effectiveSec === 'BUILD-UP' && index % 11 === 7)) &&
+    (isWeekly || diffId === 'HARD' || diffId === 'INSANE' || diffId === 'DEMON') &&
+    gapToNextSec >= 1.28
+  ) {
+    return {
+      modeId: 'FEVER_SPINNER',
+      holdDurationSec: Number(Math.min(1.55, gapToNextSec - 0.34).toFixed(2)),
+    };
+  }
+
+  // Expressive Hold Arcs anchored to sustained phrase gaps — stacked with a crisp tap finisher when room allows!
+  if (gapToNextSec >= Math.max(1.06, beatDur * 1.9) && index > 1 && phraseIdx % 3 === 1) {
+    const holdDur = Number(
+      Math.max(0.55, Math.min(1.48, gapToNextSec - (canStack ? 0.54 : 0.40))).toFixed(2),
+    );
+    const stacked: StackedNoteLayer[] | undefined =
+      canStack && gapToNextSec >= holdDur + 0.54 && phraseIdx >= 6
+        ? [
+            {
+              modeId: isWeekly || diffId === 'DEMON' ? 'DOUBLE_TAP' : coreFlip,
+              angleOffsetRad: 1.38,
+              sizeScale: 1.05,
+              taps: isWeekly || diffId === 'DEMON' ? 2 : 1,
+            },
+          ]
+        : undefined;
+    return {
+      modeId: 'HOLD_ARC',
+      holdDurationSec: holdDur,
+      stackedModes: stacked,
+    };
+  }
+
+  if (equippedMods.includes('DR') && phraseIdx % 2 === 1 && index > 0 && gapToNextSec >= 0.44) {
+    return { modeId: phraseIdx % 4 === 1 ? coreFlip : coreCw };
+  }
+
+  // CHILL Daily chart: approachable full-song groove using Core + Hold + tasteful Doubles on drops
+  if (diffId === 'CHILL') {
+    if (effectiveSec === 'DROP') {
+      if (phraseIdx % 6 === 3) return { modeId: 'DOUBLE_TAP' };
+      if (phraseIdx % 4 === 2) return { modeId: coreFlip };
+      return { modeId: coreCw };
+    }
+    return { modeId: phraseIdx % 5 === 4 ? coreFlip : coreCw };
+  }
+
+  // NORMAL Daily chart: mixes Core, Reversals, Double Tap, Meteor Slash, Surge, and clean stacked pairs on drops
+  if (diffId === 'NORMAL') {
+    if (effectiveSec === 'DROP') {
+      if (phraseIdx === 4 && canStack) {
+        return {
+          modeId: coreCw,
+          stackedModes: [{ modeId: 'DOUBLE_TAP', angleOffsetRad: 0.78, taps: 2 }],
+        };
+      }
+      if (phraseIdx === 12 && canStack) {
+        return {
+          modeId: 'PURPLE_SURGE',
+          stackedModes: [{ modeId: coreFlip, angleOffsetRad: 0.74, taps: 1 }],
+        };
+      }
+      const normDrop: WaveModeId[] = [
+        coreCw,
+        'DOUBLE_TAP',
+        coreFlip,
+        canSlash ? 'METEOR_SLASH' : coreCw,
+        'PURPLE_SURGE',
+        gapToNextSec >= 0.78 ? 'MULTI_CLUSTER' : coreCw,
+      ];
+      return { modeId: normDrop[index % normDrop.length] };
+    }
+    if (phraseIdx % 6 === 2) return { modeId: 'DECAY_ARC' };
+    if (phraseIdx % 5 === 4) return { modeId: coreFlip };
+    return { modeId: coreCw };
+  }
+
+  // HARD / INSANE / DEMON (including Weekly Demon W1-W5): signature stacked choreography across every section
+  if (effectiveSec === 'DROP') {
+    // Showcase stacked dual-gametype beats across main drop phrases
+    if (canStack && phraseIdx === 2) {
+      return {
+        modeId: coreCw,
+        stackedModes: [
+          {
+            modeId: isWeekly || diffId === 'DEMON' ? 'BEAT_BURST' : 'DOUBLE_TAP',
+            angleOffsetRad: 0.74,
+            taps: isWeekly || diffId === 'DEMON' ? 3 : 2,
+          },
+        ],
+      };
+    }
+    if (canStack && phraseIdx === 7) {
+      return {
+        modeId: 'PURPLE_SURGE',
+        stackedModes: [{ modeId: 'SNIPER_MICRO', angleOffsetRad: 0.68, sizeScale: 0.88 }],
+      };
+    }
+    if (canStack && phraseIdx === 11) {
+      return {
+        modeId: coreFlip,
+        stackedModes: [{ modeId: 'DOUBLE_TAP', angleOffsetRad: 0.78, taps: 2 }],
+      };
+    }
+    if (canStack && phraseIdx === 14 && (isWeekly || diffId === 'DEMON' || diffId === 'INSANE')) {
+      return {
+        modeId: 'DECAY_ARC',
+        stackedModes: [{ modeId: 'HAZARD_DECOY', angleOffsetRad: 0.84 }],
+      };
+    }
+
+    if ((isWeekly || diffId === 'DEMON') && relEnergy >= 0.8 && phraseIdx % 8 === 0) {
+      return { modeId: 'ONE_PASS' };
+    }
+
+    const highPool: WaveModeId[] = [
+      'DOUBLE_TAP',
+      'BEAT_BURST',
+      canSlash ? 'METEOR_SLASH' : 'PURPLE_SURGE',
+      'CASCADE_CHAIN',
+      gapToNextSec >= 0.74 ? 'OSU_PORTAL' : 'BRAKE_DRIFT',
+      'PURPLE_SURGE',
+      gapToNextSec >= 0.84 ? 'ORDERED_SEQ' : 'DOUBLE_TAP',
+      isWeekly || diffId === 'DEMON' || diffId === 'INSANE' ? 'HAZARD_DECOY' : coreFlip,
+    ];
+    const chosen = highPool[index % highPool.length];
+    return { modeId: chosen, burstCount: chosen === 'BEAT_BURST' ? 3 : undefined };
+  }
+
+  if (effectiveSec === 'BUILD-UP') {
+    if (canStack && phraseIdx === 5) {
+      return {
+        modeId: 'SNIPER_MICRO',
+        stackedModes: [{ modeId: coreFlip, angleOffsetRad: 0.72 }],
+      };
+    }
+    const buildPool: WaveModeId[] = [
+      'ORDERED_SEQ',
+      'DECAY_ARC',
+      'SPRING_BOUNCE',
+      canSlash ? 'METEOR_SLASH' : 'DOUBLE_TAP',
+      gapToNextSec >= 0.74 ? 'MULTI_CLUSTER' : coreCw,
+      'BRAKE_DRIFT',
+    ];
+    return { modeId: buildPool[index % buildPool.length] };
+  }
+
+  // INTRO / BREAKDOWN / OUTRO: crisp precision + atmospheric mechanics so quiet sections stay alive & expressive
+  if (canStack && phraseIdx === 6 && gapToNextSec >= 0.86) {
+    return {
+      modeId: 'GHOST_PULSE',
+      stackedModes: [{ modeId: 'SNIPER_MICRO', angleOffsetRad: 0.76 }],
+    };
+  }
+  const calmPool: WaveModeId[] = [
+    coreCw,
+    'SNIPER_MICRO',
+    'DECAY_ARC',
+    diffId === 'INSANE' || diffId === 'DEMON' ? 'GHOST_PULSE' : coreFlip,
+    diffId === 'INSANE' || diffId === 'DEMON' ? 'SPRING_BOUNCE' : 'DOUBLE_TAP',
+    gapToNextSec >= 0.74 ? 'OSU_PORTAL' : coreFlip,
+  ];
+  return { modeId: calmPool[index % calmPool.length] };
+}
+
+/**
  * Generates an audio-locked BeatmapNote[] where EVERY note hits on a real MP3 transient
  * or quantized musical subdivision inside that specific track.
  */
@@ -536,9 +789,13 @@ export function buildSongBeatmap(
   diffId: DifficultyId,
   equippedMods: ModCode[],
 ): BeatmapNote[] {
-  const effectiveDiff: DifficultyId = song.chillOnly ? 'CHILL' : diffId;
+  const effectiveDiff: DifficultyId = song.chillOnly
+    ? 'CHILL'
+    : song.demonOnly
+    ? 'DEMON'
+    : diffId;
   const cfg = DIFFICULTIES[effectiveDiff] || DIFFICULTIES.CHILL;
-  const blueprint = SONG_CHARTS[song.id];
+  const blueprint = SONG_CHARTS[song.id] || DAILY_WEEKLY_CHARTS[song.id];
   const dtActive = equippedMods.includes('DT');
   const minGap = Math.max(0.20, cfg.minGapSec * (dtActive ? 0.82 : 1.0));
   const targetGap = cfg.targetGapSec * (dtActive ? 0.84 : 1.0);
@@ -590,12 +847,14 @@ export function buildSongBeatmap(
     if (notes.length >= 6) return notes;
   }
 
-  // Path 2: Official Bundled 13 MP3s using quantized musical transient anchors & steady beat-grid backbone
+  // Path 2: Official Bundled 15 MP3s + Daily/Weekly tracks using quantized musical transient anchors & steady beat-grid backbone
   if (blueprint && blueprint.peaks.length > 0) {
     const dur = blueprint.durationSec;
     const beatDur = 60 / Math.max(65, blueprint.bpm);
     const phase = blueprint.phaseSec || 0.2;
     const rawPeaks = blueprint.peaks;
+    const isDailyOrWeekly = Boolean(song.isDaily || song.isWeekly);
+    const maxCurveE = Math.max(0.18, ...blueprint.energyCurve);
 
     // Step A: Build unified candidate anchors quantized cleanly onto musical subdivisions
     const anchorMap = new Map<number, { t: number; e: number }>();
@@ -629,11 +888,13 @@ export function buildSongBeatmap(
         if (!hasNearby) {
           const bIdx = Math.min(blueprint.energyCurve.length - 1, Math.floor(snappedC / 5));
           const localE = blueprint.energyCurve[bIdx] ?? 0.55;
-          // Only fill steady beats where music is audible cleanly (skip near-silent fades)
-          if (localE >= 0.14) {
+          const relLocalE = localE / maxCurveE;
+          // Daily/Weekly use normalized energy floor so quiet melodic intros/bridges never leave dead gaps
+          const audible = isDailyOrWeekly ? relLocalE >= 0.12 : localE >= 0.14;
+          if (audible) {
             anchorMap.set(Math.round(snappedC * 100), {
               t: snappedC,
-              e: Number((localE * 0.8).toFixed(2)),
+              e: Number(((isDailyOrWeekly ? relLocalE : localE) * 0.8).toFixed(2)),
             });
           }
         }
@@ -642,7 +903,7 @@ export function buildSongBeatmap(
     }
 
     const anchors = Array.from(anchorMap.values()).sort((a, b) => a.t - b.t);
-    const restWindows = buildMusicalRestWindows(song, blueprint.energyCurve);
+    const restWindows = isDailyOrWeekly ? [] : buildMusicalRestWindows(song, blueprint.energyCurve);
 
     // Step B: Curate anchors strictly adhering to musical BPM spacing, rest breaks & Tutorial opening breathers
     const selected: { t: number; e: number }[] = [];
@@ -655,7 +916,8 @@ export function buildSongBeatmap(
       if (restWindows.some((rw) => a.t >= rw.startSec && a.t <= rw.endSec)) continue;
 
       const bIdx = Math.min(blueprint.energyCurve.length - 1, Math.floor(a.t / 5));
-      const energy = blueprint.energyCurve[bIdx] ?? 0.6;
+      const rawEnergy = blueprint.energyCurve[bIdx] ?? 0.6;
+      const energy = isDailyOrWeekly ? Math.min(1, rawEnergy / maxCurveE) : rawEnergy;
       const prog = a.t / Math.max(1, dur);
       const sec = getSectionAtProgress(song, prog);
 
@@ -663,7 +925,7 @@ export function buildSongBeatmap(
       const secSpacingScale =
         isTutorial && selected.length < 6
           ? 1.35
-          : sec === 'DROP'
+          : sec === 'DROP' || (isDailyOrWeekly && energy >= 0.72)
           ? 0.86
           : sec === 'BUILD-UP'
           ? 0.94
@@ -682,7 +944,7 @@ export function buildSongBeatmap(
       lastSelectedT = a.t;
     }
 
-    // Step C: Build final BeatmapNotes with dynamic size/speed contrast & clean post-hold recovery
+    // Step C: Build final BeatmapNotes with dynamic size/speed contrast, stacked gametypes & clean post-hold recovery
     const notes: BeatmapNote[] = [];
     let prevSection: SongSection = 'INTRO';
 
@@ -693,19 +955,32 @@ export function buildSongBeatmap(
       const prog = cur.t / Math.max(1, dur);
       const section = getSectionAtProgress(song, prog);
 
-      const picked = pickMusicalModeForAnchor(
-        song,
-        effectiveDiff,
-        section,
-        prevSection,
-        i,
-        cur.e,
-        gap,
-        equippedMods,
-        blueprint.holdBias,
-        blueprint.burstBias,
-        blueprint.flipBias,
-      );
+      const picked = isDailyOrWeekly
+        ? choreographDailyWeeklyNote(
+            song,
+            effectiveDiff,
+            section,
+            prevSection,
+            i,
+            cur.e,
+            gap,
+            beatDur,
+            equippedMods,
+          )
+        : pickMusicalModeForAnchor(
+            song,
+            effectiveDiff,
+            section,
+            prevSection,
+            i,
+            cur.e,
+            gap,
+            equippedMods,
+            blueprint.holdBias,
+            blueprint.burstBias,
+            blueprint.flipBias,
+          );
+
       const dynamics = computeDynamicNoteDynamics(
         effectiveDiff,
         section,
@@ -725,6 +1000,10 @@ export function buildSongBeatmap(
         speedScale: dynamics.speedScale,
         holdDurationSec: picked.holdDurationSec ? Number(picked.holdDurationSec) : undefined,
         burstCount: picked.burstCount,
+        stackedModes:
+          'stackedModes' in picked
+            ? (picked.stackedModes as StackedNoteLayer[] | undefined)
+            : undefined,
       });
       prevSection = section;
     }
@@ -765,6 +1044,12 @@ export function evaluateEarnedBadges(
   nextTotalOrbsEarned: number,
   nextMechanicStats: PlayerProfile['mechanicStats'],
   nextSongRecords: PlayerProfile['songRecords'],
+  extras?: {
+    nextTotalOverdrives?: number;
+    nextDailyStreak?: number;
+    nextCompletedDailyCount?: number;
+    nextCompletedWeeklyCount?: number;
+  },
 ): TrophyBadge[] {
   const earned = new Set(profile.unlockedBadges);
   const newlyUnlocked: TrophyBadge[] = [];
@@ -780,8 +1065,15 @@ export function evaluateEarnedBadges(
 
   if (cleared && songId === 'moments_passing') grant('badge_first_orbit');
   if ((nextMechanicStats.HOLD_ARC?.hits || 0) >= 15) grant('badge_hold_artisan');
+  if ((nextMechanicStats.HOLD_ARC?.hits || 0) >= 50) grant('badge_hold_master');
   if (maxStreak >= 50) grant('badge_combo_50');
+  if (maxStreak >= 100) grant('badge_combo_100');
   if (cleared && (rank === 'S' || rank === 'SS')) grant('badge_s_rank');
+  if (cleared && rank === 'SS') grant('badge_ss_master');
+
+  const ssCount = Object.values(nextSongRecords).filter((rec) => rec.bestRank === 'SS').length;
+  if (ssCount >= 5) grant('badge_ss_5');
+
   if (
     nextSongRecords.winter_solstice &&
     nextSongRecords.winter_solstice.bestRank !== 'F' &&
@@ -791,6 +1083,7 @@ export function evaluateEarnedBadges(
     grant('badge_christmas');
   }
   if (nextTotalOrbsEarned >= 100) grant('badge_orb_100');
+  if (nextTotalOrbsEarned >= 500) grant('badge_orb_500');
   if (
     cleared &&
     songId === 'final_battle' &&
@@ -802,10 +1095,32 @@ export function evaluateEarnedBadges(
   const burstSlashHits =
     (nextMechanicStats.BEAT_BURST?.hits || 0) + (nextMechanicStats.METEOR_SLASH?.hits || 0);
   if (burstSlashHits >= 20) grant('badge_burst_master');
+
+  const sniperPrecisionHits =
+    (nextMechanicStats.SNIPER_MICRO?.hits || 0) + (nextMechanicStats.ORDERED_SEQ?.hits || 0);
+  if (sniperPrecisionHits >= 30) grant('badge_sniper_master');
+
+  if ((nextMechanicStats.OSU_PORTAL?.hits || 0) >= 15) grant('badge_portal_walker');
+
   if (cleared && equippedModsCount >= 2) grant('badge_mod_smith');
+  if (cleared && equippedModsCount >= 3) grant('badge_triple_mod');
   if (profile.unlockedThemes.length - 3 + profile.purchasedMods.length >= 5) {
     grant('badge_vault_collector');
   }
+
+  if ((extras?.nextCompletedDailyCount ?? profile.completedDailyIds.length) >= 1) {
+    grant('badge_daily_first');
+  }
+  if ((extras?.nextDailyStreak ?? profile.dailyStreak) >= 3) {
+    grant('badge_daily_streak_3');
+  }
+  if ((extras?.nextCompletedWeeklyCount ?? profile.completedWeeklyIds.length) >= 1) {
+    grant('badge_weekly_demon');
+  }
+  if ((extras?.nextTotalOverdrives ?? profile.totalOverdrives) >= 1) {
+    grant('badge_overdrive_pro');
+  }
+
   const officialIds = [
     'moments_passing',
     'play_aliens',
@@ -828,4 +1143,90 @@ export function evaluateEarnedBadges(
   }
 
   return newlyUnlocked;
+}
+
+export interface MasteryPrestigeSummary {
+  tierTitle: string;
+  jpTitle: string;
+  tierColor: string;
+  points: number;
+  nextTierTitle: string | null;
+  nextTierPoints: number;
+  tierProgressPct: number;
+  ssCount: number;
+  sOrHigherCount: number;
+  clearedCount: number;
+  totalSongsCount: number;
+  ssMasteryPct: number;
+}
+
+const PRESTIGE_TIERS = [
+  { minPts: 0, title: 'Initiate', jp: '初段・見習い', color: '#94a3b8' },
+  { minPts: 250, title: 'Cadet', jp: '二段・新星', color: '#38bdf8' },
+  { minPts: 700, title: 'Vanguard', jp: '三段・先鋒', color: '#34d399' },
+  { minPts: 1400, title: 'Virtuoso', jp: '四段・達人', color: '#fbbf24' },
+  { minPts: 2400, title: 'Overlord', jp: '五段・覇者', color: '#ff3b82' },
+  { minPts: 3800, title: 'Celestial SS', jp: '極伝・神域', color: '#e879f9' },
+];
+
+export function computeMasteryPrestige(
+  profile: PlayerProfile,
+  songs: SongDefinition[],
+): MasteryPrestigeSummary {
+  let ssCount = 0;
+  let sOrHigherCount = 0;
+  let clearedCount = 0;
+  let points = 0;
+
+  for (const song of songs) {
+    const rec = profile.songRecords[song.id];
+    if (!rec || rec.bestRank === 'F') continue;
+    clearedCount += 1;
+    if (rec.bestRank === 'SS') {
+      ssCount += 1;
+      sOrHigherCount += 1;
+      points += 180;
+    } else if (rec.bestRank === 'S') {
+      sOrHigherCount += 1;
+      points += 120;
+    } else if (rec.bestRank === 'A') {
+      points += 80;
+    } else if (rec.bestRank === 'B') {
+      points += 50;
+    } else {
+      points += 30;
+    }
+  }
+
+  points += profile.unlockedBadges.length * 45;
+  points += profile.completedDailyIds.length * 35;
+  points += profile.completedWeeklyIds.length * 90;
+  points += Math.min(250, profile.bestStreak * 2);
+
+  let tierIdx = 0;
+  for (let i = 0; i < PRESTIGE_TIERS.length; i++) {
+    if (points >= PRESTIGE_TIERS[i].minPts) tierIdx = i;
+  }
+
+  const cur = PRESTIGE_TIERS[tierIdx];
+  const next = tierIdx + 1 < PRESTIGE_TIERS.length ? PRESTIGE_TIERS[tierIdx + 1] : null;
+  const tierProgressPct = next
+    ? Math.min(100, Math.max(0, ((points - cur.minPts) / (next.minPts - cur.minPts)) * 100))
+    : 100;
+  const ssMasteryPct = songs.length > 0 ? (ssCount / songs.length) * 100 : 0;
+
+  return {
+    tierTitle: cur.title,
+    jpTitle: cur.jp,
+    tierColor: cur.color,
+    points,
+    nextTierTitle: next ? next.title : null,
+    nextTierPoints: next ? next.minPts : cur.minPts,
+    tierProgressPct,
+    ssCount,
+    sOrHigherCount,
+    clearedCount,
+    totalSongsCount: songs.length,
+    ssMasteryPct,
+  };
 }

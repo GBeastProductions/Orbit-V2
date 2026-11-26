@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Flag, Home, ListMusic, Play, RotateCcw, X } from 'lucide-react';
 import { CHASSIS_THEMES } from '../data/catalog';
-import { BgFxMode, HitSfxMode, PauseTabId, PlayerProfile, ThemeId } from '../types/game';
+import { BgFxMode, HitSfxMode, OverdriveVfxMode, PauseTabId, PlayerProfile, ThemeId } from '../types/game';
 import { ArcadeSwitch } from './LazerChrome';
 import { OrbIcon } from './OrbIcon';
 
@@ -28,6 +28,7 @@ interface PauseDrawerProps {
   onSelectHitSfx: (mode: HitSfxMode) => void;
   onSelectTheme: (theme: ThemeId) => void;
   onSelectBgFx: (mode: BgFxMode) => void;
+  onSelectOverdriveVfx: (mode: OverdriveVfxMode) => void;
   isPracticeMode: boolean;
   isReplayMode: boolean;
   onTogglePracticeMode: () => void;
@@ -62,6 +63,7 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
   onSelectHitSfx,
   onSelectTheme,
   onSelectBgFx,
+  onSelectOverdriveVfx,
   isPracticeMode,
   isReplayMode,
   onTogglePracticeMode,
@@ -329,6 +331,32 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
                       }`}
                     >
                       {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-xs font-bold text-white mb-2">Overdrive Flame VFX</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'full', label: 'Full Aura' },
+                      { id: 'subtle', label: 'Subtle' },
+                      { id: 'off', label: 'Off' },
+                    ] as { id: OverdriveVfxMode; label: string }[]
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onSelectOverdriveVfx(opt.id)}
+                      className={`tactile-btn border py-2 text-xs font-bold cursor-pointer ${
+                        profile.overdriveVfxMode === opt.id
+                          ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)]'
+                          : 'border-white/12 bg-[#101420] text-[#a1abbe]'
+                      }`}
+                    >
+                      {opt.label}
                     </button>
                   ))}
                 </div>

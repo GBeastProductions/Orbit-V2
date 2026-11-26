@@ -29,6 +29,7 @@ import {
   computeLetterRank,
   computeRankOrbBonus,
   computeTotalMultiplier,
+  countBeatmapPerfectUnits,
   evaluateEarnedBadges,
   formatTimeSec,
   getSectionAtProgress,
@@ -38,6 +39,11 @@ import {
   wrapAngle,
 } from './engine/beatmap';
 import { orbitEvents } from './engine/gameEvents';
+import {
+  applyDailyWeeklyCompletion,
+  getReleasedDailyWeeklySongs,
+  isSongReleased,
+} from './store/dailyWeeklyStore';
 import { INITIAL_PROFILE, loadProfile, saveProfile } from './store/profileStore';
 import {
   getBestReplayFor,
@@ -56,6 +62,7 @@ import {
   MechanicStat,
   ModCode,
   NextCuePreview,
+  OverdriveVfxMode,
   PauseTabId,
   PlayerProfile,
   PracticeCheckpoint,
@@ -156,9 +163,14 @@ interface RuntimeEngine {
   overdriveCharge: number;
   overdriveActive: boolean;
   overdriveTimeLeft: number;
+  overdrivePerfectsEarned: number;
+  overdriveTargetPerfects: number;
+  overdriveUsedThisRun: boolean;
+  runTriggeredOverdrive: boolean;
   shockwaves: ShockwaveRing[];
   nextCuePreview: NextCuePreview | null;
   practiceMode: boolean;
+  practicePaused: boolean;
   practiceStartSec: number;
   practiceSpeed: number;
   checkpoints: PracticeCheckpoint[];
@@ -183,7 +195,10 @@ function formatKeyLabel(e: KeyboardEvent): string {
 
 export default function App() {
   const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile());
-  const [songs, setSongs] = useState<SongDefinition[]>(() => [...SONG_CATALOG]);
+  const [songs, setSongs] = useState<SongDefinition[]>(() => [
+    ...SONG_CATALOG,
+    ...getReleasedDailyWeeklySongs(),
+  ]);
   const [screen, setScreen] = useState<ScreenView>('TITLE');
   const [previousScreen, setPreviousScreen] = useState<ScreenView>('TITLE');
   const [customAudioStatus, setCustomAudioStatus] = useState('');
@@ -214,7 +229,11 @@ export default function App() {
   const [uiOverdriveCharge, setUiOverdriveCharge] = useState(0);
   const [uiOverdriveActive, setUiOverdriveActive] = useState(false);
   const [uiOverdriveTimeLeft, setUiOverdriveTimeLeft] = useState(0);
+  const [uiOverdrivePerfectsEarned, setUiOverdrivePerfectsEarned] = useState(0);
+  const [uiOverdriveTargetPerfects, setUiOverdriveTargetPerfects] = useState(20);
+  const [uiOverdriveUsed, setUiOverdriveUsed] = useState(false);
   const [uiPracticeMode, setUiPracticeMode] = useState(false);
+  const [uiPracticePaused, setUiPracticePaused] = useState(false);
   const [uiPracticeSpeed, setUiPracticeSpeed] = useState(1.0);
   const [uiPracticeStartSec, setUiPracticeStartSec] = useState(0);
   const [uiCheckpoints, setUiCheckpoints] = useState<PracticeCheckpoint[]>([]);
@@ -310,9 +329,14 @@ export default function App() {
     overdriveCharge: 0,
     overdriveActive: false,
     overdriveTimeLeft: 0,
+    overdrivePerfectsEarned: 0,
+    overdriveTargetPerfects: 20,
+    overdriveUsedThisRun: false,
+    runTriggeredOverdrive: false,
     shockwaves: [],
     nextCuePreview: null,
     practiceMode: false,
+    practicePaused: false,
     practiceStartSec: 0,
     practiceSpeed: 1.0,
     checkpoints: [],
@@ -363,6 +387,10 @@ export default function App() {
     overdriveCharge: 0,
     overdriveActive: false,
     overdriveTimeLeft: 0,
+    overdrivePerfectsEarned: 0,
+    overdriveTargetPerfects: 20,
+    overdriveUsedThisRun: false,
+    overdriveVfxMode: 'full',
     nextCuePreview: null,
     shockwaves: [],
     isPracticeMode: false,
@@ -468,7 +496,9 @@ export default function App() {
 
   const getActiveSong = useCallback(
     (p: PlayerProfile = profileRef.current, list: SongDefinition[] = songsRef.current) => {
-      return list.find((s) => s.id === p.selectedSongId) || list[0];
+      return (
+        list.find((s) => s.id === p.selectedSongId && isSongReleased(s.id)) || list[0]
+      );
     },
     [],
   );
@@ -477,6 +507,7 @@ export default function App() {
     (p: PlayerProfile = profileRef.current, song?: SongDefinition): DifficultyId => {
       const s = song || getActiveSong(p);
       if (s.chillOnly) return 'CHILL';
+      if (s.demonOnly) return 'DEMON';
       return p.selectedDifficulty;
     },
     [getActiveSong],
@@ -486,7 +517,7 @@ export default function App() {
     (eng: RuntimeEngine, p: PlayerProfile, song: SongDefinition): { diffId: DifficultyId; mods: ModCode[] } => {
       if (eng.replayMode && eng.replayData) {
         return {
-          diffId: song.chillOnly ? 'CHILL' : eng.replayData.difficulty,
+          diffId: song.chillOnly ? 'CHILL' : song.demonOnly ? 'DEMON' : eng.replayData.difficulty,
           mods: eng.replayData.equippedMods,
         };
       }
@@ -503,6 +534,7 @@ export default function App() {
     let hw = 0.44 * diff.arcScale;
     if (mods.includes('HR')) hw *= 0.78;
     if (mods.includes('EZ')) hw *= 1.28;
+    if (mods.includes('SM')) hw *= 0.90;
     return Math.max(0.11, Math.min(0.68, hw));
   }, []);
 
@@ -521,9 +553,11 @@ export default function App() {
           : 2.35;
       let speed = (Math.PI * 2) / (beatsPerRev * beatDur);
       if (mods.includes('DT')) speed *= 1.12;
+      if (mods.includes('VD')) speed *= 1.14;
       if (mods.includes('EZ')) speed *= 0.90;
+      if (mods.includes('SA')) speed *= 0.84;
       if (modeId === 'PURPLE_SURGE') speed *= 1.24;
-      return Math.max(1.25, Math.min(4.8, speed));
+      return Math.max(1.2, Math.min(4.95, speed));
     },
     [],
   );
@@ -597,6 +631,8 @@ export default function App() {
       const nextMechStats = mergeMechanicStatsIntoProfile(p.mechanicStats, mechDeltas);
       const baseRunOrbs = cashOutApproved ? eng.unbankedOrbs + rankBonusOrbs : 0;
       const provisionalTotalOrbs = p.totalOrbsEarned + baseRunOrbs;
+      const dailyWeeklyPatch = isUnranked ? {} : applyDailyWeeklyCompletion(p, song, cleared);
+      const nextTotalOverdrives = p.totalOverdrives + (!isUnranked && eng.runTriggeredOverdrive ? 1 : 0);
 
       const newlyEarnedBadges = isUnranked
         ? []
@@ -611,6 +647,14 @@ export default function App() {
             provisionalTotalOrbs,
             nextMechStats,
             nextRecords,
+            {
+              nextTotalOverdrives,
+              nextDailyStreak: dailyWeeklyPatch.dailyStreak ?? p.dailyStreak,
+              nextCompletedDailyCount:
+                dailyWeeklyPatch.completedDailyIds?.length ?? p.completedDailyIds.length,
+              nextCompletedWeeklyCount:
+                dailyWeeklyPatch.completedWeeklyIds?.length ?? p.completedWeeklyIds.length,
+            },
           );
 
       const badgeBonusOrbs = newlyEarnedBadges.reduce((acc, b) => acc + b.orbReward, 0);
@@ -654,6 +698,7 @@ export default function App() {
           tutorialSongCompleted: nextTutorialDone,
           orbs: nextOrbs,
           totalOrbsEarned: nextTotalOrbs,
+          totalOverdrives: prev.totalOverdrives + (eng.runTriggeredOverdrive ? 1 : 0),
           songRecords: nextRecords,
           tierBestScores: nextTierBests,
           unlockedBadges: Array.from(
@@ -668,6 +713,7 @@ export default function App() {
           totalMisses: prev.totalMisses + missesDelta,
           earlyMisses: prev.earlyMisses + earlyDelta,
           lateMisses: prev.lateMisses + lateDelta,
+          ...applyDailyWeeklyCompletion(prev, song, cleared),
         }));
       }
 
@@ -817,6 +863,7 @@ export default function App() {
         eng.targets = [
           {
             id: 1,
+            modeId,
             angle: primaryAngle,
             baseAngle: primaryAngle,
             halfWidth: baseHW,
@@ -840,6 +887,7 @@ export default function App() {
         eng.targets = [
           {
             id: 1,
+            modeId,
             angle: primaryAngle,
             baseAngle: primaryAngle,
             halfWidth: Math.max(0.24, baseHW * 1.08),
@@ -867,6 +915,7 @@ export default function App() {
         eng.targets = [
           {
             id: 1,
+            modeId,
             angle: primaryAngle,
             baseAngle: primaryAngle,
             halfWidth: baseHW * 0.94,
@@ -881,6 +930,7 @@ export default function App() {
           },
           {
             id: 2,
+            modeId,
             angle: secondAngle,
             baseAngle: secondAngle,
             halfWidth: baseHW * 0.94,
@@ -902,9 +952,9 @@ export default function App() {
         const hw = baseHW * 0.90;
         const seqExpire = noteHitT !== undefined ? noteHitT + (span * 2) / Math.max(1, eng.baseAngularSpeed) + standardGrace : undefined;
         eng.targets = [
-          { id: 1, angle: a1, baseAngle: a1, halfWidth: hw, initialHalfWidth: hw, tapsLeft: 1, seqNum: 1, alpha: 1, enteredWindow: false, spawnTime: eng.songTime, targetHitTime: noteHitT, expireTime: seqExpire },
-          { id: 2, angle: a2, baseAngle: a2, halfWidth: hw, initialHalfWidth: hw, tapsLeft: 1, seqNum: 2, alpha: 1, enteredWindow: false, spawnTime: eng.songTime, targetHitTime: noteHitT !== undefined ? noteHitT + span / Math.max(1, eng.baseAngularSpeed) : undefined, expireTime: seqExpire },
-          { id: 3, angle: a3, baseAngle: a3, halfWidth: hw, initialHalfWidth: hw, tapsLeft: 1, seqNum: 3, alpha: 1, enteredWindow: false, spawnTime: eng.songTime, targetHitTime: noteHitT !== undefined ? noteHitT + (span * 2) / Math.max(1, eng.baseAngularSpeed) : undefined, expireTime: seqExpire },
+          { id: 1, modeId, angle: a1, baseAngle: a1, halfWidth: hw, initialHalfWidth: hw, tapsLeft: 1, seqNum: 1, alpha: 1, enteredWindow: false, spawnTime: eng.songTime, targetHitTime: noteHitT, expireTime: seqExpire },
+          { id: 2, modeId, angle: a2, baseAngle: a2, halfWidth: hw, initialHalfWidth: hw, tapsLeft: 1, seqNum: 2, alpha: 1, enteredWindow: false, spawnTime: eng.songTime, targetHitTime: noteHitT !== undefined ? noteHitT + span / Math.max(1, eng.baseAngularSpeed) : undefined, expireTime: seqExpire },
+          { id: 3, modeId, angle: a3, baseAngle: a3, halfWidth: hw, initialHalfWidth: hw, tapsLeft: 1, seqNum: 3, alpha: 1, enteredWindow: false, spawnTime: eng.songTime, targetHitTime: noteHitT !== undefined ? noteHitT + (span * 2) / Math.max(1, eng.baseAngularSpeed) : undefined, expireTime: seqExpire },
         ];
       } else if (modeId === 'METEOR_SLASH') {
         const echoOffset = Math.max(0.95, Math.min(1.75, travelAngle * 0.82));
@@ -913,6 +963,7 @@ export default function App() {
         eng.targets = [
           {
             id: 1,
+            modeId,
             angle: primaryAngle,
             baseAngle: primaryAngle,
             halfWidth: baseHW,
@@ -927,6 +978,7 @@ export default function App() {
           },
           {
             id: 2,
+            modeId,
             angle: echoAngle,
             baseAngle: echoAngle,
             halfWidth: baseHW * 1.06,
@@ -957,6 +1009,7 @@ export default function App() {
         eng.targets = [
           {
             id: 1,
+            modeId,
             angle: targetA,
             baseAngle: targetA,
             halfWidth: baseHW,
@@ -988,6 +1041,7 @@ export default function App() {
         eng.targets = [
           {
             id: 1,
+            modeId,
             angle: primaryAngle,
             baseAngle: primaryAngle,
             halfWidth: hw,
@@ -1001,11 +1055,72 @@ export default function App() {
             expireTime: tapExpire,
           },
         ];
-        if (modeId === 'HAZARD_DECOY') {
+        if (modeId === 'HAZARD_DECOY' || (mods.includes('HO') && !eng.isTutorialRun && eng.waveIndex % 2 === 0)) {
           eng.hazards = [
-            { angle: wrapAngle(primaryAngle - eng.direction * (hw + 0.38)), halfWidth: 0.14 },
-            { angle: wrapAngle(primaryAngle + eng.direction * (hw + 0.38)), halfWidth: 0.14 },
+            { angle: wrapAngle(primaryAngle - eng.direction * (hw + 0.40)), halfWidth: 0.13 },
+            { angle: wrapAngle(primaryAngle + eng.direction * (hw + 0.40)), halfWidth: 0.13 },
           ];
+        }
+      }
+
+      // Append any simultaneous Stacked Gametype layers cleanly along the sweep arc
+      if (note?.stackedModes && note.stackedModes.length > 0 && modeId !== 'FEVER_SPINNER') {
+        const primaryHoldSpan = eng.targets[0]?.holdSpanRad || 0;
+        for (const layer of note.stackedModes) {
+          if (layer.modeId === 'FEVER_SPINNER') continue;
+          const baseOffset =
+            primaryHoldSpan > 0
+              ? primaryHoldSpan + Math.max(0.46, (layer.angleOffsetRad || 1.2) - 0.88)
+              : Math.max(0.68, layer.angleOffsetRad || 0.78);
+          const stackAngle = wrapAngle(primaryAngle + eng.direction * baseOffset);
+          const stackTaps =
+            layer.modeId === 'DOUBLE_TAP'
+              ? 2
+              : layer.modeId === 'BEAT_BURST'
+              ? layer.taps || 3
+              : layer.taps || 1;
+          const stackHW =
+            layer.modeId === 'SNIPER_MICRO'
+              ? Math.max(0.11, baseHW * 0.72)
+              : layer.modeId === 'DECAY_ARC'
+              ? Math.min(0.76, baseHW * 1.15)
+              : layer.modeId === 'DOUBLE_TAP' || layer.modeId === 'BEAT_BURST'
+              ? Math.min(0.76, Math.max(baseHW * 1.18, 0.34))
+              : baseHW * (layer.sizeScale ?? 0.96);
+          const stackTravelTime = baseOffset / Math.max(1, eng.baseAngularSpeed);
+          const stackHitT = noteHitT !== undefined ? noteHitT + stackTravelTime : undefined;
+          const stackExpire =
+            stackHitT !== undefined
+              ? stackHitT + (stackTaps > 1 ? Math.max(standardGrace + 0.56, multiGrace + 0.25) : standardGrace + 0.12)
+              : undefined;
+          eng.targets.push({
+            id: eng.targets.length + 1,
+            modeId: layer.modeId,
+            angle: stackAngle,
+            baseAngle: stackAngle,
+            halfWidth: stackHW,
+            initialHalfWidth: stackHW,
+            tapsLeft: stackTaps,
+            seqNum: 0,
+            alpha: 1,
+            enteredWindow: false,
+            spawnTime: eng.songTime,
+            targetHitTime: stackHitT,
+            expireTime: stackExpire,
+          });
+          if (layer.modeId === 'HAZARD_DECOY') {
+            const m1 = wrapAngle(stackAngle - eng.direction * (stackHW + 0.34));
+            const m2 = wrapAngle(stackAngle + eng.direction * (stackHW + 0.34));
+            if (Math.abs(signedAngleDiff(m1, primaryAngle)) > baseHW + 0.18) {
+              eng.hazards.push({ angle: m1, halfWidth: 0.13 });
+            }
+            if (Math.abs(signedAngleDiff(m2, primaryAngle)) > baseHW + 0.18) {
+              eng.hazards.push({ angle: m2, halfWidth: 0.13 });
+            }
+          }
+          if (stackExpire !== undefined && eng.targets[0]?.expireTime !== undefined) {
+            eng.targets[0].expireTime = Math.max(eng.targets[0].expireTime, stackExpire);
+          }
         }
       }
     },
@@ -1096,6 +1211,14 @@ export default function App() {
       eng.overdriveCharge = 0;
       eng.overdriveActive = false;
       eng.overdriveTimeLeft = 0;
+      eng.overdrivePerfectsEarned = 0;
+      const odRatio = mods.includes('SG') ? 0.35 : 0.45;
+      eng.overdriveTargetPerfects = sandboxMode
+        ? 20
+        : Math.max(4, Math.ceil(countBeatmapPerfectUnits(eng.beatmap) * odRatio));
+      eng.overdriveUsedThisRun = false;
+      eng.runTriggeredOverdrive = false;
+      eng.practicePaused = false;
       eng.hubStatusText = nextReplayMode ? 'REPLAY' : nextPracticeMode ? 'PRACTICE' : 'READY';
       eng.hubStatusColor = nextReplayMode ? '#c084fc' : nextPracticeMode ? '#38bdf8' : null;
       eng.hubStatusTimer = nextReplayMode || nextPracticeMode ? 0.65 : 0;
@@ -1149,7 +1272,11 @@ export default function App() {
       setUiOverdriveCharge(0);
       setUiOverdriveActive(false);
       setUiOverdriveTimeLeft(0);
+      setUiOverdrivePerfectsEarned(0);
+      setUiOverdriveTargetPerfects(eng.overdriveTargetPerfects);
+      setUiOverdriveUsed(false);
       setUiPracticeMode(eng.practiceMode);
+      setUiPracticePaused(false);
       setUiPracticeSpeed(eng.practiceSpeed);
       setUiPracticeStartSec(eng.practiceStartSec);
       setUiCheckpoints([...eng.checkpoints]);
@@ -1291,7 +1418,8 @@ export default function App() {
   }, [flushRunProfileDeltas]);
 
   const seekPracticeToTime = useCallback(
-    (targetSec: number, restoreCp?: PracticeCheckpoint) => {
+    (targetSec: number, restoreCp?: PracticeCheckpoint, skipAudioStart = false) => {
+      audioEngine.unlock();
       const eng = engineRef.current;
       const p = profileRef.current;
       const song = getActiveSong(p);
@@ -1301,9 +1429,12 @@ export default function App() {
       eng.songTime = clamped;
       eng.hp = 100;
       eng.streak = restoreCp ? restoreCp.streak : 0;
-      eng.overdriveActive = false;
-      eng.overdriveCharge = 0;
-      eng.overdriveTimeLeft = 0;
+      eng.overdriveActive = restoreCp ? restoreCp.overdriveActive : false;
+      eng.overdriveCharge = restoreCp ? restoreCp.overdriveCharge : 0;
+      eng.overdriveTimeLeft = restoreCp ? restoreCp.overdriveTimeLeft : 0;
+      eng.overdrivePerfectsEarned = restoreCp ? restoreCp.overdrivePerfectsEarned : 0;
+      eng.overdriveUsedThisRun = restoreCp ? restoreCp.overdriveUsedThisRun : false;
+      eng.practicePaused = false;
       eng.targets = [];
       eng.hazards = [];
       eng.portal = null;
@@ -1326,6 +1457,7 @@ export default function App() {
       eng.hubStatusColor = '#38bdf8';
       eng.hubStatusTimer = 0.55;
       eng.phase = 'PLAYING';
+      eng.lastPhysicsTimeMs = performance.now();
 
       setUiPhase('PLAYING');
       setUiHp(100);
@@ -1333,14 +1465,19 @@ export default function App() {
       setUiScore(eng.score);
       setUiSongTime(clamped);
       setUiSection(eng.songSection);
-      setUiOverdriveCharge(0);
-      setUiOverdriveActive(false);
-      setUiOverdriveTimeLeft(0);
+      setUiOverdriveCharge(eng.overdriveCharge);
+      setUiOverdriveActive(eng.overdriveActive);
+      setUiOverdriveTimeLeft(eng.overdriveTimeLeft);
+      setUiOverdrivePerfectsEarned(eng.overdrivePerfectsEarned);
+      setUiOverdriveUsed(eng.overdriveUsedThisRun);
+      setUiPracticePaused(false);
 
-      audioEngine.playCheckpointSound(p.soundEnabled);
+      if (!skipAudioStart) {
+        audioEngine.playCheckpointSound(p.soundEnabled);
+      }
       spawnNextWave(false, null);
 
-      if (eng.phase === 'PLAYING') {
+      if (eng.phase === 'PLAYING' && !skipAudioStart) {
         audioEngine.startAtOffset(
           song,
           clamped,
@@ -1380,6 +1517,11 @@ export default function App() {
       direction: eng.direction,
       score: eng.score,
       streak: eng.streak,
+      overdriveCharge: eng.overdriveCharge,
+      overdrivePerfectsEarned: eng.overdrivePerfectsEarned,
+      overdriveUsedThisRun: eng.overdriveUsedThisRun,
+      overdriveActive: eng.overdriveActive,
+      overdriveTimeLeft: eng.overdriveTimeLeft,
     };
     eng.checkpoints = [...eng.checkpoints, cp];
     setUiCheckpoints([...eng.checkpoints]);
@@ -1430,14 +1572,10 @@ export default function App() {
       }
 
       if (!isUnranked) {
-        recordMechanicStat(eng, eng.waveModeId, 'miss');
+        recordMechanicStat(eng, targetRef?.modeId || eng.waveModeId, 'miss');
       }
       eng.missCount += 1;
       eng.streak = 0;
-      if (!eng.overdriveActive) {
-        eng.overdriveCharge = Math.max(0, eng.overdriveCharge - 15);
-        setUiOverdriveCharge(eng.overdriveCharge);
-      }
       setUiStreak(0);
       setUiAccuracy(computeCurrentAccuracy(eng));
 
@@ -1501,7 +1639,7 @@ export default function App() {
           : diffId === 'INSANE'
           ? 14
           : 16;
-      const modeAdj = eng.waveModeId === 'ONE_PASS' ? 5 : 0;
+      const modeAdj = (targetRef?.modeId || eng.waveModeId) === 'ONE_PASS' ? 5 : 0;
       const modMult = mods.includes('HR') ? 1.3 : mods.includes('EZ') ? 0.55 : 1.0;
       const drain = Math.round((baseDrain + modeAdj) * modMult);
 
@@ -1556,6 +1694,7 @@ export default function App() {
       offsetDeg: number,
       labelOverride?: string,
       orbGain = 0,
+      hitModeId?: WaveModeId,
     ) => {
       const eng = engineRef.current;
       const p = profileRef.current;
@@ -1563,7 +1702,9 @@ export default function App() {
       const { diffId, mods } = getRunConfig(eng, p, song);
       const isUnranked = Boolean(eng.sandboxModeId || eng.practiceMode || eng.replayMode);
       const isPerfect = tier === 'PERFECT';
-      const fxColor = tier === 'PERFECT' ? (eng.overdriveActive ? '#fde047' : '#ffffff') : tier === 'GREAT' ? '#34d399' : '#22d3ee';
+      const th = CHASSIS_THEMES[p.theme] || CHASSIS_THEMES.tokyo_pink;
+      const fxColor = tier === 'PERFECT' ? (eng.overdriveActive ? th.bright : '#ffffff') : tier === 'GREAT' ? '#34d399' : '#22d3ee';
+      const effectiveModeId = hitModeId || eng.waveModeId;
 
       eng.streak += 1;
       eng.maxStreakInRun = Math.max(eng.maxStreakInRun, eng.streak);
@@ -1572,22 +1713,31 @@ export default function App() {
       const pts = eng.overdriveActive ? Math.round(basePts * 1.5) : basePts;
       eng.score += pts;
 
-      const hpGain = isPerfect ? 4.5 : tier === 'GREAT' ? 2.8 : 1.2;
+      const baseHpGain = isPerfect ? 4.5 : tier === 'GREAT' ? 2.8 : 1.2;
+      const hpGain = mods.includes('RG') ? baseHpGain * 1.5 : baseHpGain;
       eng.hp = Math.min(100, eng.hp + hpGain);
       setUiHp(eng.hp);
 
-      // Overdrive Charging & 10s 2x Orbs Surge
+      // Overdrive: Nerfed to ONCE per run upon earning 45% (or 35% with SG mod) of all possible Perfects in the track!
       let triggeredOverdriveNow = false;
-      if (!eng.overdriveActive) {
-        const chargeGain = isPerfect ? (orbGain >= 2 ? 12 : 8) : tier === 'GREAT' ? 3 : 1;
-        eng.overdriveCharge = Math.min(100, eng.overdriveCharge + chargeGain);
-        if (eng.overdriveCharge >= 100) {
+      if (!eng.overdriveActive && !eng.overdriveUsedThisRun && isPerfect) {
+        eng.overdrivePerfectsEarned += 1;
+        const targetPerf = Math.max(4, eng.overdriveTargetPerfects || 20);
+        eng.overdriveCharge = Math.min(100, (eng.overdrivePerfectsEarned / targetPerf) * 100);
+        if (eng.overdrivePerfectsEarned >= targetPerf) {
+          eng.overdriveUsedThisRun = true;
+          eng.runTriggeredOverdrive = true;
           eng.overdriveActive = true;
           eng.overdriveTimeLeft = 10.0;
+          eng.overdriveCharge = 100;
           triggeredOverdriveNow = true;
-          eng.shockwaves.push({ timer: 0.55, duration: 0.55, color: '#fb923c' });
+          eng.shockwaves.push({ timer: 0.65, duration: 0.65, color: th.bright });
+          eng.shockwaves.push({ timer: 0.46, duration: 0.46, color: th.secondary });
           if (!eng.silentSeek) audioEngine.playOverdriveIgnite(p.soundEnabled);
         }
+        setUiOverdrivePerfectsEarned(eng.overdrivePerfectsEarned);
+        setUiOverdriveTargetPerfects(targetPerf);
+        setUiOverdriveUsed(eng.overdriveUsedThisRun);
         setUiOverdriveCharge(eng.overdriveCharge);
         setUiOverdriveActive(eng.overdriveActive);
         setUiOverdriveTimeLeft(eng.overdriveTimeLeft);
@@ -1598,29 +1748,40 @@ export default function App() {
 
       if (tier === 'PERFECT') {
         eng.perfectCount += 1;
-        if (!isUnranked) recordMechanicStat(eng, eng.waveModeId, 'perfect');
+        if (!isUnranked) recordMechanicStat(eng, effectiveModeId, 'perfect');
         if (!eng.sandboxModeId && !eng.practiceMode) {
           grantedOrbs = Math.max(1, orbGain) * multOrb;
-          eng.unbankedOrbs += grantedOrbs;
-          setUiUnbankedOrbs(eng.unbankedOrbs);
         }
       } else {
         if (tier === 'GREAT') eng.greatCount += 1;
         else eng.goodCount += 1;
-        if (!isUnranked) recordMechanicStat(eng, eng.waveModeId, 'hit');
+        if (!isUnranked) recordMechanicStat(eng, effectiveModeId, 'hit');
         if (orbGain > 0 && !eng.sandboxModeId && !eng.practiceMode) {
           grantedOrbs = orbGain * multOrb;
-          eng.unbankedOrbs += grantedOrbs;
-          setUiUnbankedOrbs(eng.unbankedOrbs);
         }
       }
 
+      // Orb Amplifier (CV) mod grants +1 bonus Orb on every 10th combo milestone
+      if (
+        mods.includes('CV') &&
+        eng.streak > 0 &&
+        eng.streak % 10 === 0 &&
+        !eng.sandboxModeId &&
+        !eng.practiceMode
+      ) {
+        grantedOrbs += 1;
+      }
+
+      if (grantedOrbs > 0) {
+        eng.unbankedOrbs += grantedOrbs;
+        setUiUnbankedOrbs(eng.unbankedOrbs);
+      }
+
       if (isPerfect && !triggeredOverdriveNow && !eng.silentSeek) {
-        const t = CHASSIS_THEMES[p.theme] || CHASSIS_THEMES.tokyo_pink;
         eng.shockwaves.push({
           timer: 0.34,
           duration: 0.34,
-          color: eng.overdriveActive ? '#fde047' : t.bright,
+          color: eng.overdriveActive ? th.bright : th.secondary,
         });
       }
 
@@ -1665,7 +1826,7 @@ export default function App() {
       if (eng.hitEffects.length > 5) eng.hitEffects.shift();
 
       eng.hubStatusText = triggeredOverdriveNow ? 'OVERDRIVE!' : tier;
-      eng.hubStatusColor = triggeredOverdriveNow ? '#fb923c' : fxColor;
+      eng.hubStatusColor = triggeredOverdriveNow ? th.bright : fxColor;
       eng.hubStatusTimer = triggeredOverdriveNow ? 0.85 : 0.42;
       setUiScore(eng.score);
       setUiStreak(eng.streak);
@@ -1788,7 +1949,13 @@ export default function App() {
       }
 
       const hitTarget = eng.targets[matchedIdx];
-      if (eng.waveModeId === 'ORDERED_SEQ' && matchedIdx !== 0) {
+      const hitMode = hitTarget.modeId || eng.waveModeId;
+      if (
+        hitMode === 'ORDERED_SEQ' &&
+        eng.targets.some(
+          (other) => (other.modeId || eng.waveModeId) === 'ORDERED_SEQ' && other.seqNum < hitTarget.seqNum,
+        )
+      ) {
         recordInput('MISS');
         triggerMiss('WRONG ORDER', hitTarget);
         return true;
@@ -1820,7 +1987,7 @@ export default function App() {
       const isMultiTap = hitTarget.tapsLeft > 1 || hitTarget.lastTapAtMs !== undefined;
       const rapidFollowUp =
         hitTarget.lastTapAtMs !== undefined && nowMs - hitTarget.lastTapAtMs <= 460;
-      const perfectRatioLimit = mods.includes('RX')
+      const basePerfLimit = mods.includes('RX')
         ? isMultiTap
           ? 0.56
           : 0.34
@@ -1829,6 +1996,7 @@ export default function App() {
           ? 0.64
           : 0.46
         : 0.27;
+      const perfectRatioLimit = mods.includes('SM') ? basePerfLimit * 0.75 : basePerfLimit;
       const ratio = bestAbsDelta / Math.max(0.01, hitTarget.halfWidth);
       const tier: JudgmentTier =
         ratio <= perfectRatioLimit ? 'PERFECT' : ratio <= 0.72 ? 'GREAT' : 'GOOD';
@@ -1854,6 +2022,8 @@ export default function App() {
           hitTarget.tapsLeft === 1
             ? `${tier} · TAP ×1`
             : `${tier} · ×${hitTarget.tapsLeft} LEFT`,
+          0,
+          hitMode,
         );
         eng.hubStatusText = `×${hitTarget.tapsLeft} LEFT`;
         eng.hubStatusColor = tier === 'PERFECT' ? '#fde047' : '#22d3ee';
@@ -1864,9 +2034,10 @@ export default function App() {
       eng.targets.splice(matchedIdx, 1);
 
       // METEOR_SLASH flips direction straight toward its rebound echo!
-      if (eng.waveModeId === 'METEOR_SLASH' && eng.targets.length > 0 && eng.targets[0].isMeteorEcho) {
+      const meteorEcho = eng.targets.find((other) => other.isMeteorEcho);
+      if (hitMode === 'METEOR_SLASH' && meteorEcho) {
         eng.direction = eng.direction === 1 ? -1 : 1;
-        eng.targets[0].alpha = 1.0;
+        meteorEcho.alpha = 1.0;
         eng.angularSpeed = eng.baseAngularSpeed * 1.15;
       }
 
@@ -1876,7 +2047,7 @@ export default function App() {
             ? `DOUBLE ${tier}!`
             : `BURST ${tier}`
           : undefined;
-      awardHitSuccess(tier, offsetSigned, offsetDeg, finalLabel);
+      awardHitSuccess(tier, offsetSigned, offsetDeg, finalLabel, 0, hitMode);
 
       if (eng.targets.length > 0) return true;
 
@@ -1890,15 +2061,22 @@ export default function App() {
   const processTriggerRelease = useCallback(
     (subStepDt: number, fromReplay = false) => {
       const eng = engineRef.current;
+      const p = profileRef.current;
+      const { mods } = getRunConfig(eng, p, getActiveSong(p));
       const holdIdx = eng.targets.findIndex((t) => t.isHold && t.isHolding);
       if (holdIdx === -1) return;
 
       const holdTarget = eng.targets[holdIdx];
-      audioEngine.stopHoldShimmer();
-
       const remRad = Math.max(0.18, holdTarget.holdRemainingRad ?? holdTarget.holdSpanRad ?? 0.85);
       const travelled = Math.max(0, (holdTarget.holdTravelledRad ?? 0) + eng.angularSpeed * subStepDt);
       const prog = travelled / remRad;
+
+      // Auto-Hold Rail (GA): ignore early key release and carry needle smoothly to finish
+      if (mods.includes('GA') && !fromReplay && prog < 0.72) {
+        return;
+      }
+
+      audioEngine.stopHoldShimmer();
 
       const tier: JudgmentTier =
         prog < 0.42 ? 'MISS' : prog >= 0.72 ? 'PERFECT' : prog >= 0.54 ? 'GREAT' : 'GOOD';
@@ -1909,7 +2087,7 @@ export default function App() {
           action: 'RELEASE',
           cbsAngle: eng.spinnerAngle,
           tier,
-          modeId: eng.waveModeId,
+          modeId: holdTarget.modeId || eng.waveModeId,
         });
       }
 
@@ -1925,7 +2103,10 @@ export default function App() {
         Math.abs(1 - prog) * 14,
         undefined,
         tier === 'PERFECT' ? 1 : 0,
+        holdTarget.modeId || 'HOLD_ARC',
       );
+
+      if (eng.targets.length > 0) return;
 
       eng.waveIndex += 1;
       spawnNextWave(false, eng.sandboxModeId);
@@ -1976,6 +2157,7 @@ export default function App() {
   >(() => {});
 
   const startPracticeRound = useCallback(() => {
+    audioEngine.unlock();
     setPauseOpen(false);
     setModsOpen(false);
     setSummaryData(null);
@@ -1989,6 +2171,7 @@ export default function App() {
   }, [resetRound]);
 
   const exitPracticeMode = useCallback(() => {
+    audioEngine.unlock();
     resetRound(true, null, {
       practice: false,
       preserveCheckpoints: false,
@@ -1997,12 +2180,13 @@ export default function App() {
 
   const changePracticeSpeed = useCallback(
     (speed: number) => {
+      audioEngine.unlock();
       const eng = engineRef.current;
       const p = profileRef.current;
       const song = getActiveSong(p);
       eng.practiceSpeed = speed;
       setUiPracticeSpeed(speed);
-      if (eng.phase === 'PLAYING' && screenRef.current === 'PLAYING') {
+      if (!eng.practicePaused && eng.phase === 'PLAYING' && screenRef.current === 'PLAYING') {
         audioEngine.startAtOffset(
           song,
           eng.songTime,
@@ -2019,8 +2203,36 @@ export default function App() {
     [getActiveSong],
   );
 
+  const togglePracticePause = useCallback(() => {
+    audioEngine.unlock();
+    const eng = engineRef.current;
+    const p = profileRef.current;
+    if (!eng.practiceMode) return;
+    eng.practicePaused = !eng.practicePaused;
+    setUiPracticePaused(eng.practicePaused);
+    if (eng.practicePaused) {
+      audioEngine.stop();
+      audioEngine.stopHoldShimmer();
+    } else if (eng.phase === 'PLAYING') {
+      const song = getActiveSong(p);
+      eng.lastPhysicsTimeMs = performance.now();
+      audioEngine.startAtOffset(
+        song,
+        eng.songTime,
+        p.musicEnabled,
+        p.musicVolume,
+        p.soundEnabled,
+        p.sfxVolume,
+        false,
+        1.0,
+        eng.practiceSpeed,
+      );
+    }
+  }, [getActiveSong]);
+
   const startReplayPlayback = useCallback(
     (replay: ReplayData) => {
+      audioEngine.unlock();
       setPauseOpen(false);
       setModsOpen(false);
       setSummaryData(null);
@@ -2038,11 +2250,13 @@ export default function App() {
   );
 
   const exitReplayMode = useCallback(() => {
+    audioEngine.unlock();
     resetRound(false, null, { replay: null });
   }, [resetRound]);
 
   const seekReplayToTime = useCallback(
-    (targetSec: number) => {
+    (targetSec: number, skipAudioStart = false) => {
+      audioEngine.unlock();
       const eng = engineRef.current;
       const p = profileRef.current;
       if (!eng.replayMode || !eng.replayData) return;
@@ -2051,10 +2265,14 @@ export default function App() {
       const clamped = Math.max(0, Math.min(Math.max(0.5, song.durationSec - 0.5), targetSec));
       const wasPaused = eng.replayPaused;
 
-      audioEngine.stop();
+      if (!skipAudioStart) {
+        audioEngine.stop();
+      }
       audioEngine.stopHoldShimmer();
 
       eng.silentSeek = true;
+      eng.isTutorialRun = false;
+      eng.sandboxModeId = null;
       eng.phase = 'PLAYING';
       eng.score = 0;
       eng.hp = 100;
@@ -2081,6 +2299,13 @@ export default function App() {
       eng.overdriveCharge = 0;
       eng.overdriveActive = false;
       eng.overdriveTimeLeft = 0;
+      eng.overdrivePerfectsEarned = 0;
+      eng.overdriveTargetPerfects = Math.max(
+        4,
+        Math.ceil(countBeatmapPerfectUnits(eng.beatmap) * (mods.includes('SG') ? 0.35 : 0.45)),
+      );
+      eng.overdriveUsedThisRun = false;
+      eng.runTriggeredOverdrive = false;
       eng.perfectCount = 0;
       eng.greatCount = 0;
       eng.goodCount = 0;
@@ -2114,9 +2339,12 @@ export default function App() {
       setUiOverdriveCharge(eng.overdriveCharge);
       setUiOverdriveActive(eng.overdriveActive);
       setUiOverdriveTimeLeft(eng.overdriveTimeLeft);
+      setUiOverdrivePerfectsEarned(eng.overdrivePerfectsEarned);
+      setUiOverdriveTargetPerfects(eng.overdriveTargetPerfects);
+      setUiOverdriveUsed(eng.overdriveUsedThisRun);
       setUiReplayLastClickLabel(eng.replayLastClickLabel);
 
-      if (eng.phase === 'PLAYING' && !wasPaused) {
+      if (eng.phase === 'PLAYING' && !wasPaused && !skipAudioStart) {
         audioEngine.startAtOffset(
           song,
           eng.songTime,
@@ -2134,6 +2362,7 @@ export default function App() {
   );
 
   const toggleReplayPause = useCallback(() => {
+    audioEngine.unlock();
     const eng = engineRef.current;
     const p = profileRef.current;
     if (!eng.replayMode) return;
@@ -2254,7 +2483,7 @@ export default function App() {
             eng.shockwaves.push({
               timer: 0.42,
               duration: 0.42,
-              color: eng.overdriveActive ? '#fb923c' : `rgba(${th.bgAccentRgb}, 0.72)`,
+              color: eng.overdriveActive ? th.bright : `rgba(${th.bgAccentRgb}, 0.72)`,
             });
             if (eng.shockwaves.length > 6) eng.shockwaves.shift();
           }
@@ -2336,7 +2565,7 @@ export default function App() {
           const rem = Math.max(0, upcoming.hitTime - eng.songTime);
           eng.breakRemainingSec = rem;
           if (rem > 2.0 && eng.hp < 100) {
-            eng.hp = Math.min(100, eng.hp + simDt * 2.2);
+            eng.hp = Math.min(100, eng.hp + simDt * (mods.includes('RG') ? 4.5 : 2.2));
             if (!eng.silentSeek) setUiHp(eng.hp);
           }
           if (rem <= 1.45) {
@@ -2386,19 +2615,23 @@ export default function App() {
         if (eng.waveModeId === 'BRAKE_DRIFT') {
           const mod = 0.68 + 0.50 * Math.abs(Math.sin(eng.waveElapsed * 3.4));
           eng.angularSpeed = eng.baseAngularSpeed * mod;
+        } else if (mods.includes('VD') && eng.songSection === 'DROP' && eng.waveModeId !== 'METEOR_SLASH') {
+          const mod = 0.84 + 0.30 * Math.abs(Math.sin(eng.waveElapsed * 3.1));
+          eng.angularSpeed = eng.baseAngularSpeed * mod;
         } else if (eng.waveModeId !== 'METEOR_SLASH') {
           eng.angularSpeed = eng.baseAngularSpeed;
         }
 
-        // Update Hold Arcs & Fever Spinners at 240Hz
+        // Update Hold Arcs, Fever Spinners & per-target stacked behaviors at 240Hz
         for (let i = eng.targets.length - 1; i >= 0; i--) {
           const t = eng.targets[i];
+          const tMode = t.modeId || eng.waveModeId;
           if (t.isFeverSpinner) {
             t.feverRemainingSec = (t.feverRemainingSec || 1.2) - simDt;
             if ((t.feverRemainingSec || 0) <= 0) {
               if ((t.feverHits || 0) >= 2) {
                 eng.targets.splice(i, 1);
-                awardHitSuccess('GOOD', 0, 0, 'FEVER CHARGED');
+                awardHitSuccess('GOOD', 0, 0, 'FEVER CHARGED', 0, tMode);
                 eng.waveIndex += 1;
                 spawnNextWave(false, eng.sandboxModeId);
               } else {
@@ -2419,23 +2652,36 @@ export default function App() {
               // Auto-complete cleanly right after the diamond release cap
               audioEngine.stopHoldShimmer();
               eng.targets.splice(i, 1);
-              awardHitSuccess('GREAT', 0.08, 3, 'HOLD COMPLETE');
-              eng.waveIndex += 1;
-              spawnNextWave(false, eng.sandboxModeId);
+              awardHitSuccess(
+                mods.includes('GA') ? 'PERFECT' : 'GREAT',
+                0.08,
+                3,
+                mods.includes('GA') ? 'RAIL LOCKED!' : 'HOLD COMPLETE',
+                0,
+                tMode,
+              );
+              if (eng.targets.length === 0) {
+                eng.waveIndex += 1;
+                spawnNextWave(false, eng.sandboxModeId);
+              }
               return;
             }
             continue;
           }
 
-          if (eng.waveModeId === 'SPRING_BOUNCE') {
+          if (tMode === 'SPRING_BOUNCE') {
             t.angle = wrapAngle(t.baseAngle + Math.sin(eng.waveElapsed * 2.8) * 0.42);
           }
-          if (eng.waveModeId === 'DECAY_ARC') {
+          if (tMode === 'DECAY_ARC') {
             t.halfWidth = Math.max(0.11, t.initialHalfWidth - eng.waveElapsed * 0.085);
           }
-          if (eng.waveModeId === 'GHOST_PULSE' || mods.includes('HD')) {
+          if (tMode === 'GHOST_PULSE' || mods.includes('HD')) {
             const dist = Math.abs(signedAngleDiff(eng.spinnerAngle, t.angle));
             t.alpha = dist < 0.95 ? Math.max(0.12, (dist / 0.95) * 0.75) : 1.0;
+          } else if (mods.includes('BF')) {
+            const dist = Math.abs(signedAngleDiff(eng.spinnerAngle, t.angle));
+            const strobe = 0.30 + 0.70 * Math.pow(Math.max(0, Math.cos(eng.beatPulse * Math.PI)), 1.5);
+            t.alpha = dist < 0.75 ? Math.max(0.14, (dist / 0.75) * 0.65) : strobe;
           }
         }
 
@@ -2469,13 +2715,24 @@ export default function App() {
           }
         }
 
-        if (eng.waveModeId === 'ONE_PASS' || mods.includes('SD')) {
-          const targetsToCheck =
-            eng.waveModeId === 'ORDERED_SEQ' && eng.targets.length > 0
-              ? [eng.targets[0]]
-              : eng.targets.filter((t) => !t.isHolding && !t.isFeverSpinner);
-          for (let i = 0; i < targetsToCheck.length; i++) {
-            const t = targetsToCheck[i];
+        const hasOnePassTarget = eng.targets.some(
+          (t) => (t.modeId || eng.waveModeId) === 'ONE_PASS',
+        );
+        if (hasOnePassTarget || mods.includes('SD')) {
+          const orderedTargets = eng.targets.filter(
+            (t) => (t.modeId || eng.waveModeId) === 'ORDERED_SEQ',
+          );
+          const candidateTargets = eng.targets.filter((t) => {
+            if (t.isHolding || t.isFeverSpinner) return false;
+            const tm = t.modeId || eng.waveModeId;
+            if (!mods.includes('SD') && tm !== 'ONE_PASS') return false;
+            if (tm === 'ORDERED_SEQ' && orderedTargets.length > 0 && t.id !== orderedTargets[0].id) {
+              return false;
+            }
+            return true;
+          });
+          for (let i = 0; i < candidateTargets.length; i++) {
+            const t = candidateTargets[i];
             const overNow =
               Math.abs(signedAngleDiff(eng.spinnerAngle, t.angle)) <= t.halfWidth + NEEDLE_TOLERANCE;
             if (overNow) {
@@ -2485,7 +2742,8 @@ export default function App() {
               return;
             }
           }
-        } else if (!eng.sandboxModeId && eng.targets.length > 0) {
+        }
+        if (!eng.sandboxModeId && eng.targets.length > 0) {
           const pendingExpire = eng.targets.filter((t) => !t.isHolding && !t.isFeverSpinner);
           if (pendingExpire.length > 0) {
             const lastExpire = Math.max(...pendingExpire.map((t) => t.expireTime ?? 999999));
@@ -2508,14 +2766,15 @@ export default function App() {
       const song = getActiveSong(p);
       const { diffId, mods } = getRunConfig(eng, p, song);
 
-      const activeRate =
-        eng.replayMode
-          ? eng.replayPaused
-            ? 0
-            : eng.replaySpeed
-          : eng.practiceMode
-          ? eng.practiceSpeed
-          : 1.0;
+      const isPausedSubmode =
+        (eng.replayMode && eng.replayPaused) || (eng.practiceMode && eng.practicePaused);
+      const activeRate = isPausedSubmode
+        ? 0
+        : eng.replayMode
+        ? eng.replaySpeed
+        : eng.practiceMode
+        ? eng.practiceSpeed
+        : 1.0;
 
       // Lock master audio clock cleanly at frame start (speed-synced in Practice / Replay)
       if (eng.phase === 'PLAYING' && screenRef.current === 'PLAYING' && !eng.sandboxModeId && activeRate > 0) {
@@ -2533,7 +2792,7 @@ export default function App() {
         }
       }
 
-      if (!(eng.replayMode && eng.replayPaused)) {
+      if (!isPausedSubmode) {
         eng.physicsAccum = Math.min(0.08, eng.physicsAccum + frameDt * activeRate);
         while (eng.physicsAccum >= FIXED_DT) {
           stepPhysics(FIXED_DT, now, song, p);
@@ -2577,6 +2836,9 @@ export default function App() {
         setUiOverdriveCharge(eng.overdriveCharge);
         setUiOverdriveActive(eng.overdriveActive);
         setUiOverdriveTimeLeft(eng.overdriveTimeLeft);
+        setUiOverdrivePerfectsEarned(eng.overdrivePerfectsEarned);
+        setUiOverdriveTargetPerfects(eng.overdriveTargetPerfects);
+        setUiOverdriveUsed(eng.overdriveUsedThisRun);
         if (eng.replayMode) {
           setUiReplayLastClickLabel(eng.replayLastClickLabel);
         }
@@ -2628,6 +2890,10 @@ export default function App() {
       cs.overdriveCharge = eng.overdriveCharge;
       cs.overdriveActive = eng.overdriveActive;
       cs.overdriveTimeLeft = eng.overdriveTimeLeft;
+      cs.overdrivePerfectsEarned = eng.overdrivePerfectsEarned;
+      cs.overdriveTargetPerfects = eng.overdriveTargetPerfects;
+      cs.overdriveUsedThisRun = eng.overdriveUsedThisRun;
+      cs.overdriveVfxMode = p.overdriveVfxMode || 'full';
       cs.nextCuePreview = nextCuePreview;
       cs.shockwaves = eng.shockwaves;
       cs.isPracticeMode = eng.practiceMode;
@@ -2654,6 +2920,7 @@ export default function App() {
   const openPause = useCallback(
     (tab: PauseTabId = 'main') => {
       flushRunProfileDeltas();
+      audioEngine.stopHoldShimmer();
       setModsOpen(false);
       if (!pauseOpenRef.current) {
         phaseBeforeOverlayRef.current =
@@ -2686,7 +2953,7 @@ export default function App() {
         const rate = eng.replayMode ? eng.replaySpeed : eng.practiceMode ? eng.practiceSpeed : 1.0;
         eng.phase = 'PLAYING';
         setUiPhase('PLAYING');
-        if (!(eng.replayMode && eng.replayPaused)) {
+        if (!(eng.replayMode && eng.replayPaused) && !(eng.practiceMode && eng.practicePaused)) {
           audioEngine.startAtOffset(
             song,
             eng.songTime,
@@ -2706,6 +2973,7 @@ export default function App() {
 
   const openMods = useCallback(() => {
     flushRunProfileDeltas();
+    audioEngine.stopHoldShimmer();
     setPauseOpen(false);
     if (!modsOpenRef.current) {
       phaseBeforeOverlayRef.current =
@@ -2728,7 +2996,7 @@ export default function App() {
       const rate = eng.replayMode ? eng.replaySpeed : eng.practiceMode ? eng.practiceSpeed : 1.0;
       eng.phase = 'PLAYING';
       setUiPhase('PLAYING');
-      if (!(eng.replayMode && eng.replayPaused)) {
+      if (!(eng.replayMode && eng.replayPaused) && !(eng.practiceMode && eng.practicePaused)) {
         audioEngine.startAtOffset(
           song,
           eng.songTime,
@@ -2746,6 +3014,7 @@ export default function App() {
 
   const openShopScreen = useCallback(() => {
     flushRunProfileDeltas();
+    audioEngine.stopHoldShimmer();
     setPauseOpen(false);
     setModsOpen(false);
     if (screenRef.current === 'PLAYING' && engineRef.current.phase === 'PLAYING') {
@@ -2888,7 +3157,8 @@ export default function App() {
       warpTimersRef.current.forEach((id) => window.clearTimeout(id));
       warpTimersRef.current = [];
       audioEngine.playUiLaunch(profileRef.current.soundEnabled);
-      setWarpLaunchLabel(`${song.title} · ${song.chillOnly ? 'CHILL' : diffId}`);
+      const effectiveLabel = song.chillOnly ? 'CHILL' : song.demonOnly ? 'DEMON' : diffId;
+      setWarpLaunchLabel(`${song.title} · ${effectiveLabel}`);
       const t1 = window.setTimeout(() => {
         setScreen('PLAYING');
         resetRound(true, null);
@@ -2903,9 +3173,10 @@ export default function App() {
 
   const previewSong = useCallback(
     (songId: string, withAudioPreview = true) => {
+      if (withAudioPreview) audioEngine.unlock();
       const p = profileRef.current;
       const song = songsRef.current.find((s) => s.id === songId) || songsRef.current[0];
-      const nextDiff = song.chillOnly ? 'CHILL' : p.selectedDifficulty;
+      const nextDiff = song.chillOnly ? 'CHILL' : song.demonOnly ? 'DEMON' : p.selectedDifficulty;
       updateProfile({ selectedSongId: song.id, selectedDifficulty: nextDiff });
       orbitEvents.emit('onTrackChange', { songId: song.id, title: song.title, difficulty: nextDiff });
       if (withAudioPreview && p.musicEnabled) {
@@ -2927,6 +3198,7 @@ export default function App() {
 
   const enterSongSelect = useCallback(() => {
     flushRunProfileDeltas();
+    audioEngine.stopHoldShimmer();
     setPauseOpen(false);
     setModsOpen(false);
     setSummaryData(null);
@@ -3150,7 +3422,7 @@ export default function App() {
         <TitleScreen
           profile={profile}
           activeSong={activeSong}
-          songsCount={songs.length}
+          songs={songs}
           onPlayPrimary={handlePlayPrimary}
           onEnterSongSelect={enterSongSelect}
           onOpenOrbVault={() => {
@@ -3219,6 +3491,7 @@ export default function App() {
           }}
           onSelectTheme={(tid) => updateProfile({ theme: tid })}
           onSelectBgFx={(mode) => updateProfile({ bgFxMode: mode })}
+          onSelectOverdriveVfx={(mode) => updateProfile({ overdriveVfxMode: mode })}
           onOpenShop={() => {
             setPreviousScreen('SETTINGS');
             setScreen('SHOP');
@@ -3249,6 +3522,7 @@ export default function App() {
               hitSfxMode: INITIAL_PROFILE.hitSfxMode,
               audioOffsetMs: INITIAL_PROFILE.audioOffsetMs,
               bgFxMode: INITIAL_PROFILE.bgFxMode,
+              overdriveVfxMode: INITIAL_PROFILE.overdriveVfxMode,
               theme: INITIAL_PROFILE.theme,
               equippedMods: [],
             }));
@@ -3374,6 +3648,7 @@ export default function App() {
             phase={uiPhase}
             themeId={profile.theme}
             bgFxMode={profile.bgFxMode}
+            overdriveVfxMode={profile.overdriveVfxMode}
             allowPointerTap={profile.allowPointerTap}
             onTriggerPress={handleTriggerPress}
             onTriggerRelease={handleTriggerRelease}
@@ -3408,20 +3683,25 @@ export default function App() {
             overdriveCharge={uiOverdriveCharge}
             overdriveActive={uiOverdriveActive}
             overdriveTimeLeft={uiOverdriveTimeLeft}
+            overdrivePerfectsEarned={uiOverdrivePerfectsEarned}
+            overdriveTargetPerfects={uiOverdriveTargetPerfects}
+            overdriveUsed={uiOverdriveUsed}
             isPracticeMode={uiPracticeMode}
+            practicePaused={uiPracticePaused}
             practiceSpeed={uiPracticeSpeed}
             practiceStartSec={uiPracticeStartSec}
             practiceCheckpoints={uiCheckpoints}
             songDurationSec={activeSong.durationSec}
             songTime={uiSongTime}
+            onTogglePracticePause={togglePracticePause}
             onDropCheckpoint={dropPracticeCheckpoint}
             onRemoveCheckpoint={removePracticeCheckpoint}
             onRespawnCheckpoint={respawnPracticeCheckpoint}
             onChangePracticeSpeed={changePracticeSpeed}
-            onPracticeSeek={(sec) => {
+            onPracticeSeek={(sec, skipAudioStart) => {
               engineRef.current.practiceStartSec = sec;
               setUiPracticeStartSec(sec);
-              seekPracticeToTime(sec);
+              seekPracticeToTime(sec, undefined, Boolean(skipAudioStart));
             }}
             onExitPractice={exitPracticeMode}
             isReplayMode={uiReplayMode}
@@ -3432,7 +3712,7 @@ export default function App() {
             replayLastClickLabel={uiReplayLastClickLabel}
             onToggleReplayPause={toggleReplayPause}
             onChangeReplaySpeed={changeReplaySpeed}
-            onReplaySeek={seekReplayToTime}
+            onReplaySeek={(sec, skipAudioStart) => seekReplayToTime(sec, Boolean(skipAudioStart))}
             onExitReplay={exitReplayMode}
           />
         </>
@@ -3458,6 +3738,7 @@ export default function App() {
         }}
         onGoToSongSelect={enterSongSelect}
         onGoToTitle={() => {
+          audioEngine.stopHoldShimmer();
           setPauseOpen(false);
           setScreen('TITLE');
         }}
@@ -3488,6 +3769,7 @@ export default function App() {
         }}
         onSelectTheme={(tid) => updateProfile({ theme: tid })}
         onSelectBgFx={(mode) => updateProfile({ bgFxMode: mode })}
+        onSelectOverdriveVfx={(mode) => updateProfile({ overdriveVfxMode: mode })}
         isPracticeMode={uiPracticeMode}
         isReplayMode={uiReplayMode}
         onTogglePracticeMode={togglePracticeModeFromPause}

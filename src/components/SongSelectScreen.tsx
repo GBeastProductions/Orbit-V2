@@ -1,23 +1,31 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Film,
   Flag,
+  Flame,
   ImagePlus,
+  Library,
   Lock,
   Play,
+  Search,
   Shuffle,
   SlidersHorizontal,
   Snowflake,
   Upload,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
 import {
   DIFFICULTIES,
   DIFFICULTY_ORDER,
-  SONG_CATEGORIES,
 } from '../data/catalog';
 import {
   computeModMultiplier,
@@ -25,10 +33,14 @@ import {
   formatTimeSec,
 } from '../engine/beatmap';
 import {
+  formatCountdown,
+  getDailyRotationState,
+  getWeeklyRotationState,
+} from '../store/dailyWeeklyStore';
+import {
   DifficultyId,
   LevelBackgroundSetting,
   PlayerProfile,
-  SongCategory,
   SongDefinition,
 } from '../types/game';
 import { DiscCartridge } from './DiscCartridge';
@@ -92,6 +104,9 @@ async function resizeImageToDataUrl(file: File): Promise<string> {
   });
 }
 
+type TrackPillar = 'library' | 'daily' | 'weekly';
+type LibraryPackFilter = 'all' | 'christmas' | 'arcade' | 'electronic' | 'tutorial' | 'custom';
+
 export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
   ({
     profile,
@@ -114,21 +129,91 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
     onResetLevelBg,
     onUploadCustomAudio,
   }) => {
-    const [activeCategory, setActiveCategory] = useState<'all' | SongCategory>('all');
-    const [showStageEditor, setShowStageEditor] = useState(false);
-    const bgFileInputRef = useRef<HTMLInputElement>(null);
-    const mp3FileInputRef = useRef<HTMLInputElement>(null);
-
     const selectedSong =
       songs.find((s) => s.id === profile.selectedSongId) || songs[0];
 
+    const initialPillar: TrackPillar = selectedSong.isDaily
+      ? 'daily'
+      : selectedSong.isWeekly
+      ? 'weekly'
+      : 'library';
+    const [activePillar, setActivePillar] = useState<TrackPillar>(initialPillar);
+    const [libraryPack, setLibraryPack] = useState<LibraryPackFilter>('all');
+    const [packMenuOpen, setPackMenuOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [showUpcomingSchedule, setShowUpcomingSchedule] = useState(false);
+    const [showStageEditor, setShowStageEditor] = useState(false);
+    const [nowMs, setNowMs] = useState(() => Date.now());
+    const bgFileInputRef = useRef<HTMLInputElement>(null);
+    const mp3FileInputRef = useRef<HTMLInputElement>(null);
+    const packDropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+      return () => window.clearInterval(id);
+    }, []);
+
+    useEffect(() => {
+      if (!packMenuOpen) return;
+      const onPointerDown = (e: PointerEvent) => {
+        if (
+          packDropdownRef.current &&
+          !packDropdownRef.current.contains(e.target as Node)
+        ) {
+          setPackMenuOpen(false);
+        }
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') setPackMenuOpen(false);
+      };
+      window.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('keydown', onKeyDown);
+      return () => {
+        window.removeEventListener('pointerdown', onPointerDown);
+        window.removeEventListener('keydown', onKeyDown);
+      };
+    }, [packMenuOpen]);
+
+    // Keep pillar synced if Random picks a song from another pillar
+    useEffect(() => {
+      if (selectedSong.isDaily) setActivePillar('daily');
+      else if (selectedSong.isWeekly) setActivePillar('weekly');
+    }, [selectedSong.id, selectedSong.isDaily, selectedSong.isWeekly]);
+
+    const dailyState = useMemo(() => getDailyRotationState(nowMs), [nowMs]);
+    const weeklyState = useMemo(() => getWeeklyRotationState(nowMs), [nowMs]);
+
+    const librarySongs = useMemo(
+      () => songs.filter((s) => !s.isDaily && !s.isWeekly),
+      [songs],
+    );
+    const dailySongs = useMemo(() => songs.filter((s) => s.isDaily), [songs]);
+    const weeklySongs = useMemo(() => songs.filter((s) => s.isWeekly), [songs]);
+
     const filteredSongs = useMemo(() => {
-      if (activeCategory === 'all') return songs;
-      return songs.filter((s) => s.category === activeCategory);
-    }, [songs, activeCategory]);
+      if (activePillar === 'daily') return dailySongs;
+      if (activePillar === 'weekly') return weeklySongs;
+      const q = searchQuery.trim().toLowerCase();
+      return librarySongs.filter((s) => {
+        if (libraryPack !== 'all' && s.category !== libraryPack) return false;
+        if (!q) return true;
+        return (
+          s.title.toLowerCase().includes(q) ||
+          s.artist.toLowerCase().includes(q) ||
+          s.genre.toLowerCase().includes(q)
+        );
+      });
+    }, [activePillar, dailySongs, libraryPack, librarySongs, searchQuery, weeklySongs]);
+
+    const customSongCount = useMemo(
+      () => librarySongs.filter((s) => s.category === 'custom').length,
+      [librarySongs],
+    );
 
     const effectiveDiffId: DifficultyId = selectedSong.chillOnly
       ? 'CHILL'
+      : selectedSong.demonOnly
+      ? 'DEMON'
       : profile.selectedDifficulty;
     const activeDiff = DIFFICULTIES[effectiveDiffId] || DIFFICULTIES.CHILL;
     const songRecord = profile.songRecords[selectedSong.id];
@@ -141,7 +226,9 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
       selectedSong.orbCost === 0 ||
       profile.unlockedSongs.includes(selectedSong.id);
     const diffUnlocked =
-      profile.devUnlocked || profile.unlockedDiffs.includes(effectiveDiffId);
+      profile.devUnlocked ||
+      Boolean(selectedSong.demonOnly) ||
+      profile.unlockedDiffs.includes(effectiveDiffId);
     const canLaunch = songUnlocked && diffUnlocked;
     const activeArtSrc = bgSetting.customImageDataUrl || selectedSong.bgImageUrl;
 
@@ -202,7 +289,9 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                 const file = e.target.files?.[0];
                 if (file) {
                   onUploadCustomAudio(file, 'CUSTOM');
-                  setActiveCategory('custom');
+                  setActivePillar('library');
+                  setLibraryPack('custom');
+                  setSearchQuery('');
                   e.target.value = '';
                 }
               }}
@@ -329,10 +418,14 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                 <div className="grid grid-cols-5 gap-1.5">
                   {DIFFICULTY_ORDER.map((diffId) => {
                     const cfg = DIFFICULTIES[diffId];
-                    const disabled = selectedSong.chillOnly && diffId !== 'CHILL';
+                    const disabled =
+                      (selectedSong.chillOnly && diffId !== 'CHILL') ||
+                      (Boolean(selectedSong.demonOnly) && diffId !== 'DEMON');
                     const isSelected = effectiveDiffId === diffId;
                     const isUnlocked =
-                      profile.devUnlocked || profile.unlockedDiffs.includes(diffId);
+                      profile.devUnlocked ||
+                      (Boolean(selectedSong.demonOnly) && diffId === 'DEMON') ||
+                      profile.unlockedDiffs.includes(diffId);
                     const stars = selectedSong.stars[diffId] || '—';
 
                     return (
@@ -366,7 +459,13 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                     );
                   })}
                 </div>
-                <p className="mt-2 text-xs text-[#808ba1]">{activeDiff.desc}</p>
+                <p className="mt-2 text-xs text-[#808ba1]">
+                  {selectedSong.demonOnly
+                    ? 'Weekly Demon Gauntlet — Locked to DEMON difficulty with free entry.'
+                    : selectedSong.chillOnly
+                    ? 'Calibration Track — Locked to CHILL difficulty.'
+                    : activeDiff.desc}
+                </p>
               </div>
 
               {/* Personal Best & Next Rank Forecast */}
@@ -516,48 +615,255 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
             </div>
           </section>
 
-          {/* RIGHT CAROUSEL */}
+          {/* RIGHT CAROUSEL — Scalable 3-Pillar Architecture + Pack Dropdown & Search */}
           <section className="relative flex flex-col lg:overflow-hidden lg:col-span-7">
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              {SONG_CATEGORIES.map((cat) => {
-                const isActive = activeCategory === cat.id;
-                const isChristmas = cat.id === 'christmas';
-                const catSongs =
-                  cat.id === 'all' ? songs : songs.filter((s) => s.category === cat.id);
-                const count = catSongs.length;
-                if (cat.id === 'custom' && count === 0) return null;
+            {/* Primary 3-Pillar Mode Switcher (Never wraps/bloats as new packs arrive) */}
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePillar('library');
+                    setShowUpcomingSchedule(false);
+                    if (librarySongs.length > 0 && (selectedSong.isDaily || selectedSong.isWeekly)) {
+                      onPreviewSong(librarySongs[0].id);
+                    }
+                  }}
+                  className={`tactile-btn lazer-slant-sm border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-extrabold cursor-pointer whitespace-nowrap shrink-0 ${
+                    activePillar === 'library'
+                      ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)]'
+                      : 'border-white/12 bg-[#101420]/90 text-[#b6bfd1] hover:border-white/30 hover:text-white'
+                  }`}
+                >
+                  <span className="lazer-unslant-sm flex items-center gap-1.5">
+                    <Library className="h-3.5 w-3.5" />
+                    <span>Library</span>
+                    <span className="tabular-nums opacity-75">({librarySongs.length})</span>
+                  </span>
+                </button>
 
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveCategory(cat.id);
-                      if (catSongs.length > 0 && !catSongs.some((s) => s.id === selectedSong.id)) {
-                        onPreviewSong(catSongs[0].id);
-                      }
-                    }}
-                    className={`tactile-btn lazer-slant-sm border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 ${
-                      isActive
-                        ? isChristmas
-                          ? 'border-[#38bdf8] bg-[#0284c7] text-white'
-                          : 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)]'
-                        : 'border-white/12 bg-[#101420]/90 text-[#b6bfd1] hover:border-white/30 hover:text-white'
-                    }`}
-                  >
-                    <span className="lazer-unslant-sm flex items-center gap-1.5">
-                      {isChristmas && <Snowflake className="h-3.5 w-3.5 text-[#bae6fd]" />}
-                      <span>{cat.label}</span>
-                      <span className="tabular-nums opacity-75">({count})</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePillar('daily');
+                    setShowUpcomingSchedule(false);
+                    if (dailySongs.length > 0 && !selectedSong.isDaily) {
+                      onPreviewSong(dailySongs[0].id);
+                    }
+                  }}
+                  className={`tactile-btn lazer-slant-sm border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-extrabold cursor-pointer whitespace-nowrap shrink-0 ${
+                    activePillar === 'daily'
+                      ? 'border-[#22d3ee] bg-[#0891b2] text-white'
+                      : 'border-[#22d3ee]/25 bg-[#0b151e]/90 text-[#a5f3fc] hover:border-[#22d3ee]/60 hover:text-white'
+                  }`}
+                >
+                  <span className="lazer-unslant-sm flex items-center gap-1.5">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    <span>Daily #{dailyState.activeDayNumber}</span>
+                    <span className="tabular-nums opacity-80">({dailySongs.length})</span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePillar('weekly');
+                    setShowUpcomingSchedule(false);
+                    if (weeklySongs.length > 0 && !selectedSong.isWeekly) {
+                      onPreviewSong(weeklySongs[0].id);
+                    }
+                  }}
+                  className={`tactile-btn lazer-slant-sm border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-extrabold cursor-pointer whitespace-nowrap shrink-0 ${
+                    activePillar === 'weekly'
+                      ? 'border-[#f87171] bg-[#dc2626] text-white'
+                      : 'border-[#ef4444]/30 bg-[#1b0b12]/90 text-[#fca5a5] hover:border-[#ef4444]/65 hover:text-white'
+                  }`}
+                >
+                  <span className="lazer-unslant-sm flex items-center gap-1.5">
+                    <Flame className="h-3.5 w-3.5" />
+                    <span>Weekly Demon</span>
+                    <span className="tabular-nums opacity-80">
+                      W{String(weeklyState.activeWeekNumber).padStart(2, '0')}
                     </span>
-                  </button>
-                );
-              })}
+                  </span>
+                </button>
+              </div>
+
+              {/* Custom Dark Pack Dropdown + Search when in Library */}
+              {activePillar === 'library' && (
+                <div className="flex flex-1 min-w-[220px] sm:max-w-[380px] items-center gap-2">
+                  <div ref={packDropdownRef} className="relative shrink-0">
+                    {(() => {
+                      const packOptions: { value: LibraryPackFilter; label: string; count?: number }[] = [
+                        { value: 'all', label: 'All Packs', count: librarySongs.length },
+                        { value: 'arcade', label: 'Arcade' },
+                        { value: 'electronic', label: 'Electronic' },
+                        { value: 'christmas', label: 'Christmas 2026' },
+                        { value: 'tutorial', label: 'Calibration' },
+                        ...(customSongCount > 0
+                          ? [{ value: 'custom' as const, label: 'Custom', count: customSongCount }]
+                          : []),
+                      ];
+                      const currentOpt =
+                        packOptions.find((o) => o.value === libraryPack) || packOptions[0];
+                      const currentLabel =
+                        currentOpt.count !== undefined
+                          ? `${currentOpt.label} (${currentOpt.count})`
+                          : currentOpt.label;
+
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            aria-haspopup="listbox"
+                            aria-expanded={packMenuOpen}
+                            aria-label="Filter Library Pack"
+                            onClick={() => setPackMenuOpen((v) => !v)}
+                            className={`tactile-btn flex h-8 min-w-[144px] items-center justify-between gap-2.5 border px-3 text-xs font-bold text-white cursor-pointer transition-colors ${
+                              packMenuOpen
+                                ? 'border-[var(--accent-bright)] bg-[#151a2a]'
+                                : 'border-white/15 bg-[#0e1320] hover:border-[var(--accent-bright)]'
+                            }`}
+                          >
+                            <span className="truncate whitespace-nowrap">{currentLabel}</span>
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 shrink-0 text-[var(--accent-bright)] transition-transform duration-150 ${
+                                packMenuOpen ? 'rotate-180' : ''
+                              }`}
+                            />
+                          </button>
+
+                          {packMenuOpen && (
+                            <div
+                              role="listbox"
+                              aria-label="Library Pack Options"
+                              className="absolute left-0 top-[calc(100%+4px)] z-40 min-w-[190px] border border-[var(--accent-bright)]/55 bg-[#0b0e17]/98 py-1 shadow-[0_14px_38px_rgba(0,0,0,0.85)] backdrop-blur-md"
+                            >
+                              {packOptions.map((opt) => {
+                                const isSel = libraryPack === opt.value;
+                                const optText =
+                                  opt.count !== undefined
+                                    ? `${opt.label} (${opt.count})`
+                                    : opt.label;
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={isSel}
+                                    onClick={() => {
+                                      setLibraryPack(opt.value);
+                                      setPackMenuOpen(false);
+                                      const firstMatch = librarySongs.find(
+                                        (s) => opt.value === 'all' || s.category === opt.value,
+                                      );
+                                      if (firstMatch && firstMatch.id !== selectedSong.id) {
+                                        onPreviewSong(firstMatch.id);
+                                      }
+                                    }}
+                                    className={`flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-xs font-bold cursor-pointer transition-colors ${
+                                      isSel
+                                        ? 'bg-[var(--accent-dim)] text-white'
+                                        : 'text-[#b6bfd1] hover:bg-white/8 hover:text-white'
+                                    }`}
+                                  >
+                                    <span className="whitespace-nowrap">{optText}</span>
+                                    {isSel && (
+                                      <Check className="h-3.5 w-3.5 shrink-0 text-[var(--accent-bright)]" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="relative flex-1 min-w-[110px]">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#64748b]" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Filter tracks..."
+                      aria-label="Search tracks"
+                      className="h-8 w-full border border-white/15 bg-[#0e1320] pl-8 pr-7 text-xs text-white placeholder-[#64748b] outline-none focus:border-[var(--accent-bright)]"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        aria-label="Clear track search"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-white cursor-pointer"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="relative flex-1 overflow-hidden">
               <div className="orbit-scroll h-full space-y-2.5 overflow-y-auto px-2 pb-6">
-                {filteredSongs.map((song) => {
+                {/* Daily 24h Rotation Hub Strip */}
+                {activePillar === 'daily' && (
+                  <div className="border-l-2 border-[#22d3ee] bg-[#0a131d]/90 px-4 py-2.5 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-display font-extrabold text-sm text-white">
+                          Day #{dailyState.activeDayNumber} Live
+                        </span>
+                        <span className="text-[11px] font-bold text-[#34d399] tabular-nums">
+                          Streak {profile.dailyStreak}d
+                        </span>
+                      </div>
+                      <span className="tabular-nums font-bold text-[#22d3ee]">
+                        Next Drop in {formatCountdown(dailyState.remainingMs)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Weekly Demon 7d Rotation Hub Strip */}
+                {activePillar === 'weekly' && (
+                  <div className="border-l-2 border-[#ef4444] bg-[#190a11]/90 px-4 py-2.5 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-display font-extrabold text-sm text-white">
+                          Week W{String(weeklyState.activeWeekNumber).padStart(2, '0')} Demon Gauntlet
+                        </span>
+                        <span className="text-[11px] font-bold text-[#fca5a5]">
+                          DEMON Only · Open Entry
+                        </span>
+                      </div>
+                      <span className="tabular-nums font-bold text-[#fca5a5]">
+                        Rotates in {formatCountdown(weeklyState.remainingMs)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {filteredSongs.length === 0 && (
+                  <div className="border border-white/10 bg-[#0d111b]/80 px-5 py-8 text-center text-xs text-[#9aa5ba]">
+                    No tracks match your filter.{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLibraryPack('all');
+                        setSearchQuery('');
+                      }}
+                      className="font-bold text-[var(--accent-bright)] hover:underline cursor-pointer"
+                    >
+                      Reset filter
+                    </button>
+                  </div>
+                )}
+
+                {/* Playable Track List */}
+                {filteredSongs.map((song, songIdx) => {
                   const isSelected = song.id === selectedSong.id;
                   const unlocked =
                     profile.devUnlocked ||
@@ -567,103 +873,241 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                   const art =
                     profile.levelBgSettings[song.id]?.customImageDataUrl || song.bgImageUrl;
                   const starLabel =
-                    song.stars[song.chillOnly ? 'CHILL' : effectiveDiffId] ||
+                    song.stars[song.chillOnly ? 'CHILL' : song.demonOnly ? 'DEMON' : effectiveDiffId] ||
                     song.stars.CHILL ||
+                    song.stars.DEMON ||
                     '';
                   const isChristmasTrack = song.category === 'christmas';
+                  const isDailyCleared =
+                    song.isDaily && profile.completedDailyIds.includes(song.id);
+                  const isWeeklyCleared =
+                    song.isWeekly && profile.completedWeeklyIds.includes(song.id);
+                  const showArchiveHeader =
+                    (activePillar === 'daily' || activePillar === 'weekly') && songIdx === 1;
 
                   return (
-                    <button
-                      key={song.id}
-                      type="button"
-                      onClick={() => onPreviewSong(song.id)}
-                      className={`tactile-btn lazer-slant-sm group relative flex w-full items-center justify-between gap-4 overflow-hidden border px-4 py-2.5 text-left cursor-pointer ${
-                        isSelected
-                          ? 'border-[var(--accent-bright)] bg-[#171d2f] shadow-[0_0_24px_rgba(var(--bg-accent-rgb,255,59,130),0.22)] translate-x-1'
-                          : isChristmasTrack
-                          ? 'border-[#38bdf8]/35 bg-[#0d121d] hover:border-[#38bdf8]/75'
-                          : 'border-white/10 bg-[#0d111b] hover:border-white/25 hover:bg-[#131826]'
-                      }`}
-                    >
-                      {art && (
-                        <div
-                          aria-hidden="true"
-                          className="pointer-events-none absolute inset-y-0 right-0 w-[56%] overflow-hidden"
-                        >
-                          <img
-                            src={art}
-                            alt=""
-                            referrerPolicy="no-referrer"
-                            className={`h-full w-full object-cover transition-opacity duration-200 ${
-                              isSelected ? 'opacity-38' : 'opacity-20 group-hover:opacity-32'
-                            } ${!unlocked ? 'grayscale' : ''}`}
-                          />
-                          <div
-                            className={`absolute inset-0 ${
-                              isSelected
-                                ? 'bg-gradient-to-r from-[#171d2f] via-[#171d2f]/80 to-[#171d2f]/30'
-                                : 'bg-gradient-to-r from-[#0d111b] via-[#0d111b]/82 to-[#0d111b]/35'
-                            }`}
-                          />
+                    <React.Fragment key={song.id}>
+                      {showArchiveHeader && (
+                        <div className="border-t border-white/10 pt-2.5 pb-0.5 text-[11px] font-extrabold uppercase tracking-wider text-[#9aa5ba]">
+                          Past Archive
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => onPreviewSong(song.id)}
+                        className={`tactile-btn lazer-slant-sm group relative flex w-full items-center justify-between gap-4 overflow-hidden border px-4 py-2.5 text-left cursor-pointer ${
+                          isSelected
+                            ? 'border-[var(--accent-bright)] bg-[#171d2f] shadow-[0_0_24px_rgba(var(--bg-accent-rgb,255,59,130),0.22)] translate-x-1'
+                            : isChristmasTrack
+                            ? 'border-[#38bdf8]/35 bg-[#0d121d] hover:border-[#38bdf8]/75'
+                            : song.demonOnly
+                            ? 'border-[#ef4444]/35 bg-[#160c13] hover:border-[#ef4444]/75'
+                            : song.isDaily
+                            ? 'border-[#22d3ee]/30 bg-[#0b131d] hover:border-[#22d3ee]/70'
+                            : 'border-white/10 bg-[#0d111b] hover:border-white/25 hover:bg-[#131826]'
+                        }`}
+                      >
+                        {art && (
+                          <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 right-0 w-[56%] overflow-hidden"
+                          >
+                            <img
+                              src={art}
+                              alt=""
+                              referrerPolicy="no-referrer"
+                              className={`h-full w-full object-cover transition-opacity duration-200 ${
+                                isSelected ? 'opacity-38' : 'opacity-20 group-hover:opacity-32'
+                              } ${!unlocked ? 'grayscale' : ''}`}
+                            />
+                            <div
+                              className={`absolute inset-0 ${
+                                isSelected
+                                  ? 'bg-gradient-to-r from-[#171d2f] via-[#171d2f]/80 to-[#171d2f]/30'
+                                  : 'bg-gradient-to-r from-[#0d111b] via-[#0d111b]/82 to-[#0d111b]/35'
+                              }`}
+                            />
+                          </div>
+                        )}
 
-                      <div className="lazer-unslant-sm relative z-10 flex w-full items-center justify-between gap-4 min-w-0">
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          <DiscCartridge
-                            imageUrl={art}
-                            num={song.num}
-                            title={song.title}
-                            size="sm"
-                            spinning={isSelected}
-                            locked={!unlocked}
-                          />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="font-display truncate text-sm sm:text-base font-extrabold text-white">
-                                {song.title}
-                              </span>
-                              {isChristmasTrack && (
-                                <Snowflake className="h-3.5 w-3.5 shrink-0 text-[#38bdf8]" />
-                              )}
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-2 text-xs text-[#b6bfd1] truncate tabular-nums">
-                              <span className="truncate">{song.artist}</span>
-                              <span aria-hidden="true">·</span>
-                              <span>{song.bpm} BPM</span>
-                              <span aria-hidden="true">·</span>
-                              <span>{formatTimeSec(song.durationSec)}</span>
+                        <div className="lazer-unslant-sm relative z-10 flex w-full items-center justify-between gap-4 min-w-0">
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            <DiscCartridge
+                              imageUrl={art}
+                              num={song.num}
+                              title={song.title}
+                              size="sm"
+                              spinning={isSelected}
+                              locked={!unlocked}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-display truncate text-sm sm:text-base font-extrabold text-white">
+                                  {song.title}
+                                </span>
+                                {isChristmasTrack && (
+                                  <Snowflake className="h-3.5 w-3.5 shrink-0 text-[#38bdf8]" />
+                                )}
+                                {song.isDaily && (
+                                  <span className="shrink-0 border border-[#22d3ee]/45 bg-[#082530] px-1.5 py-0.5 text-[9px] font-black tracking-wider text-[#22d3ee]">
+                                    {song.id === dailyState.activeSong.id ? 'LIVE DAILY' : 'ARCHIVE'}
+                                  </span>
+                                )}
+                                {song.isWeekly && (
+                                  <span className="shrink-0 border border-[#ef4444]/45 bg-[#2d0c13] px-1.5 py-0.5 text-[9px] font-black tracking-wider text-[#fca5a5]">
+                                    {song.id === weeklyState.activeSong.id ? 'LIVE DEMON' : 'ARCHIVE'}
+                                  </span>
+                                )}
+                                {(isDailyCleared || isWeeklyCleared) && (
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#34d399]" />
+                                )}
+                              </div>
+                              <div className="mt-0.5 flex items-center gap-2 text-xs text-[#b6bfd1] truncate tabular-nums">
+                                <span className="truncate">{song.artist}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{song.bpm} BPM</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{formatTimeSec(song.durationSec)}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-3 sm:gap-4 shrink-0 tabular-nums">
-                          {starLabel && (
-                            <span className="text-xs font-semibold text-[#d1d5db]">
-                              {starLabel}
-                            </span>
-                          )}
-                          {!unlocked ? (
-                            <span className="flex items-center gap-1 text-xs font-bold text-[#fbbf24] whitespace-nowrap">
-                              <Lock className="h-3.5 w-3.5" />
-                              <span>{song.orbCost} Orbs</span>
-                            </span>
-                          ) : rec ? (
-                            <span
-                              className={`font-display text-lg font-black ${
-                                RANK_COLORS[rec.bestRank] || 'text-white'
-                              }`}
-                            >
-                              {rec.bestRank}
-                            </span>
-                          ) : (
-                            <span className="text-xs font-medium text-[#9aa5ba]">Ready</span>
-                          )}
+                          <div className="flex items-center gap-3 sm:gap-4 shrink-0 tabular-nums">
+                            {starLabel && (
+                              <span className="text-xs font-semibold text-[#d1d5db]">
+                                {starLabel}
+                              </span>
+                            )}
+                            {!unlocked ? (
+                              <span className="flex items-center gap-1 text-xs font-bold text-[#fbbf24] whitespace-nowrap">
+                                <Lock className="h-3.5 w-3.5" />
+                                <span>{song.orbCost} Orbs</span>
+                              </span>
+                            ) : rec ? (
+                              <span
+                                className={`font-display text-lg font-black ${
+                                  RANK_COLORS[rec.bestRank] || 'text-white'
+                                }`}
+                              >
+                                {rec.bestRank}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-medium text-[#9aa5ba]">Ready</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                    </React.Fragment>
                   );
                 })}
+
+                {/* Collapsible Sealed Upcoming Daily Schedule (Days 2-10 locked until rotation date) */}
+                {activePillar === 'daily' && dailyState.upcomingSlots.length > 0 && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowUpcomingSchedule((v) => !v)}
+                      className="flex w-full items-center justify-between border border-white/10 bg-[#0b1019] px-3.5 py-2 text-[11px] font-extrabold uppercase tracking-wider text-[#9aa5ba] hover:border-[#22d3ee]/40 hover:text-white cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {showUpcomingSchedule ? (
+                          <ChevronDown className="h-3.5 w-3.5 text-[#22d3ee]" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 text-[#22d3ee]" />
+                        )}
+                        <span>Upcoming Daily Schedule ({dailyState.upcomingSlots.length} Sealed)</span>
+                      </span>
+                      <span className="text-[#22d3ee] tabular-nums">
+                        Day #{dailyState.upcomingSlots[0].number} in{' '}
+                        {formatCountdown(dailyState.upcomingSlots[0].unlockMs - nowMs)}
+                      </span>
+                    </button>
+
+                    {showUpcomingSchedule && (
+                      <div className="mt-2 space-y-1.5">
+                        {dailyState.upcomingSlots.map((slot) => (
+                          <div
+                            key={slot.song.id}
+                            aria-disabled="true"
+                            className="flex items-center justify-between gap-4 border border-white/8 bg-[#090c14]/80 px-4 py-2 opacity-65 cursor-not-allowed select-none"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/10 bg-[#101420] text-xs font-black text-[#64748b] tabular-nums">
+                                D{String(slot.number).padStart(2, '0')}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#94a3b8]">
+                                  <Lock className="h-3 w-3 text-[#64748b]" />
+                                  <span>Daily Track #{slot.number} · Sealed</span>
+                                </div>
+                                <span className="text-[11px] text-[#64748b]">
+                                  Unlocks automatically at scheduled 24h rotation
+                                </span>
+                              </div>
+                            </div>
+                            <span className="shrink-0 tabular-nums text-[11px] font-bold text-[#22d3ee]">
+                              {formatCountdown(slot.unlockMs - nowMs)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Collapsible Sealed Upcoming Weekly Demon Schedule (Weeks 2-5 locked until rotation date) */}
+                {activePillar === 'weekly' && weeklyState.upcomingSlots.length > 0 && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowUpcomingSchedule((v) => !v)}
+                      className="flex w-full items-center justify-between border border-[#ef4444]/20 bg-[#120a10] px-3.5 py-2 text-[11px] font-extrabold uppercase tracking-wider text-[#cbd5e1] hover:border-[#ef4444]/45 hover:text-white cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {showUpcomingSchedule ? (
+                          <ChevronDown className="h-3.5 w-3.5 text-[#f87171]" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 text-[#f87171]" />
+                        )}
+                        <span>Upcoming Weekly Demons ({weeklyState.upcomingSlots.length} Sealed)</span>
+                      </span>
+                      <span className="text-[#fca5a5] tabular-nums">
+                        W{String(weeklyState.upcomingSlots[0].number).padStart(2, '0')} in{' '}
+                        {formatCountdown(weeklyState.upcomingSlots[0].unlockMs - nowMs)}
+                      </span>
+                    </button>
+
+                    {showUpcomingSchedule && (
+                      <div className="mt-2 space-y-1.5">
+                        {weeklyState.upcomingSlots.map((slot) => (
+                          <div
+                            key={slot.song.id}
+                            aria-disabled="true"
+                            className="flex items-center justify-between gap-4 border border-[#ef4444]/15 bg-[#0d0a10]/85 px-4 py-2 opacity-65 cursor-not-allowed select-none"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-[#ef4444]/25 bg-[#1b0d14] text-xs font-black text-[#f87171] tabular-nums">
+                                W{String(slot.number).padStart(2, '0')}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#cbd5e1]">
+                                  <Lock className="h-3 w-3 text-[#f87171]" />
+                                  <span>Weekly Demon W{String(slot.number).padStart(2, '0')} · Sealed</span>
+                                </div>
+                                <span className="text-[11px] text-[#64748b]">
+                                  Demon-only rotation — sealed until unlock date
+                                </span>
+                              </div>
+                            </div>
+                            <span className="shrink-0 tabular-nums text-[11px] font-bold text-[#fca5a5]">
+                              {formatCountdown(slot.unlockMs - nowMs)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div
                 aria-hidden="true"

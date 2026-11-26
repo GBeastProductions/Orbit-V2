@@ -9,6 +9,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { BADGE_CATALOG, CHASSIS_THEMES, WAVE_MODES } from '../data/catalog';
+import { computeMasteryPrestige } from '../engine/beatmap';
 import { PlayerProfile, SongDefinition } from '../types/game';
 import { DiscCartridge } from './DiscCartridge';
 import { IndexIcon, OrbIcon } from './OrbIcon';
@@ -16,7 +17,7 @@ import { IndexIcon, OrbIcon } from './OrbIcon';
 interface TitleScreenProps {
   profile: PlayerProfile;
   activeSong: SongDefinition;
-  songsCount?: number;
+  songs: SongDefinition[];
   onPlayPrimary: () => void;
   onEnterSongSelect: () => void;
   onOpenOrbVault: () => void;
@@ -30,7 +31,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
   ({
     profile,
     activeSong,
-    songsCount = 15,
+    songs,
     onPlayPrimary,
     onEnterSongSelect,
     onOpenOrbVault,
@@ -40,6 +41,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
     onHoverTick,
   }) => {
     const theme = CHASSIS_THEMES[profile.theme] || CHASSIS_THEMES.tokyo_pink;
+    const prestige = computeMasteryPrestige(profile, songs);
     const [pressedKey, setPressedKey] = useState<'k1' | 'k2' | null>(null);
     const [beatPhase, setBeatPhase] = useState(0);
     const [discHovered, setDiscHovered] = useState(false);
@@ -95,7 +97,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
       {
         id: 'tracks',
         label: 'Track Select',
-        sub: `${songsCount} Songs · Christmas & Arcade`,
+        sub: `${songs.length} Songs · Daily, Weekly Demon & Arcade`,
         primary: false,
         offsetClass: 'sm:ml-4',
         onClick: onEnterSongSelect,
@@ -159,6 +161,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
 
           {/* Zone 2: Quiet Unboxed Career Telemetry */}
           <div className="hidden md:flex items-center gap-4 text-xs text-[#b6bfd1] tabular-nums whitespace-nowrap">
+            <span>
+              <strong className="font-extrabold" style={{ color: prestige.tierColor }}>
+                {prestige.tierTitle}
+              </strong>
+              <span className="ml-1.5 text-[#9aa5ba]">
+                SS {prestige.ssCount}/{prestige.totalSongsCount}
+              </span>
+            </span>
+            <span aria-hidden="true" className="text-white/25">·</span>
             <span>
               Best <strong className="ml-1 font-bold text-white">{profile.bestScore.toLocaleString()}</strong>
             </span>

@@ -9,7 +9,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { CHASSIS_THEMES } from '../data/catalog';
-import { BgFxMode, HitSfxMode, PlayerProfile, ThemeId } from '../types/game';
+import { BgFxMode, HitSfxMode, OverdriveVfxMode, PlayerProfile, ThemeId } from '../types/game';
 import { ArcadeSwitch } from './LazerChrome';
 import { CalibrationWizard } from './CalibrationWizard';
 import { OrbIcon } from './OrbIcon';
@@ -31,6 +31,7 @@ interface SettingsScreenProps {
   onSelectHitSfx: (mode: HitSfxMode) => void;
   onSelectTheme: (theme: ThemeId) => void;
   onSelectBgFx: (mode: BgFxMode) => void;
+  onSelectOverdriveVfx: (mode: OverdriveVfxMode) => void;
   onOpenShop: () => void;
   onDevUnlock: (code: string) => boolean;
   onResetCareer: () => void;
@@ -60,6 +61,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onSelectHitSfx,
   onSelectTheme,
   onSelectBgFx,
+  onSelectOverdriveVfx,
   onOpenShop,
   onDevUnlock,
   onResetCareer,
@@ -437,6 +439,35 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                       }`}
                     >
                       <span className="lazer-unslant-sm block">{mode}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-sm font-bold text-white">Overdrive Flame VFX</span>
+                  <span className="text-[11px] text-[#a1abbe]">Aura &amp; anamorphic flare intensity</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {(
+                    [
+                      { id: 'full', label: 'Full Aura' },
+                      { id: 'subtle', label: 'Subtle' },
+                      { id: 'off', label: 'Off' },
+                    ] as { id: OverdriveVfxMode; label: string }[]
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onSelectOverdriveVfx(opt.id)}
+                      className={`tactile-btn lazer-slant-sm border py-2.5 text-xs font-bold cursor-pointer ${
+                        profile.overdriveVfxMode === opt.id
+                          ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)]'
+                          : 'border-white/12 bg-[#121726] text-[#a1abbe] hover:text-white'
+                      }`}
+                    >
+                      <span className="lazer-unslant-sm block">{opt.label}</span>
                     </button>
                   ))}
                 </div>

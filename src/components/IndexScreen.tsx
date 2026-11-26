@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Award, BarChart3, BookOpen, Check, Lock, Play, Snowflake } from 'lucide-react';
+import { ArrowLeft, Award, BarChart3, BookOpen, Check, Crown, Lock, Play, Snowflake } from 'lucide-react';
 import { BADGE_CATALOG, WAVE_MODES } from '../data/catalog';
-import { TAU } from '../engine/beatmap';
+import { computeMasteryPrestige, TAU } from '../engine/beatmap';
 import { PlayerProfile, SongDefinition, WaveModeId, WaveModeInfo } from '../types/game';
 import { OrbIcon } from './OrbIcon';
 
@@ -228,6 +228,7 @@ export const IndexScreen: React.FC<IndexScreenProps> = ({
   const clearedTracksCount = songs.filter(
     (s) => profile.songRecords[s.id] && profile.songRecords[s.id].bestRank !== 'F',
   ).length;
+  const prestige = computeMasteryPrestige(profile, songs);
 
   return (
     <motion.div
@@ -445,6 +446,67 @@ export const IndexScreen: React.FC<IndexScreenProps> = ({
         {/* TAB 2: TROPHY ROOM & UNLOCKED TRACKS */}
         {tab === 'trophies' && (
           <div className="orbit-scroll h-full space-y-7 overflow-y-auto pr-1">
+            {/* Mastery Prestige Showcase */}
+            <section className="border border-white/15 bg-[#0e1320]/95 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div
+                    className="flex h-12 w-12 shrink-0 items-center justify-center border bg-[#121829]"
+                    style={{
+                      borderColor: prestige.tierColor,
+                      boxShadow: `0 0 18px ${prestige.tierColor}33`,
+                    }}
+                  >
+                    <Crown className="h-6 w-6" style={{ color: prestige.tierColor }} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-baseline gap-2.5">
+                      <span
+                        className="font-display text-2xl font-black tracking-tight"
+                        style={{ color: prestige.tierColor }}
+                      >
+                        {prestige.tierTitle}
+                      </span>
+                      <span className="text-xs font-semibold tracking-[0.16em] text-[#a1abbe]">
+                        {prestige.jpTitle}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-[#b6bfd1] tabular-nums">
+                      Mastery Rating <strong className="text-white">{prestige.points.toLocaleString()} PTS</strong>
+                      <span className="mx-2 text-white/25">·</span>
+                      SS Clears <strong className="text-[#fde047]">{prestige.ssCount}/{prestige.totalSongsCount}</strong>
+                      <span className="mx-2 text-white/25">·</span>
+                      S+ Clears <strong className="text-[#fbbf24]">{prestige.sOrHigherCount}</strong>
+                      <span className="mx-2 text-white/25">·</span>
+                      Overdrives <strong className="text-[var(--accent-bright)]">{profile.totalOverdrives}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="w-full sm:w-64 shrink-0">
+                  <div className="mb-1.5 flex items-center justify-between text-[11px] tabular-nums">
+                    <span className="font-semibold text-[#a1abbe]">
+                      {prestige.nextTierTitle
+                        ? `Next: ${prestige.nextTierTitle} (${prestige.nextTierPoints.toLocaleString()} PTS)`
+                        : 'Maximum Prestige Reached'}
+                    </span>
+                    <span className="font-extrabold text-white">
+                      {Math.round(prestige.tierProgressPct)}%
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden bg-white/10">
+                    <div
+                      className="h-full transition-all duration-300"
+                      style={{
+                        width: `${prestige.tierProgressPct}%`,
+                        backgroundColor: prestige.tierColor,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
             {/* Trophy Badges Shelf */}
             <section>
               <div className="mb-3 flex items-center justify-between">
@@ -579,7 +641,19 @@ export const IndexScreen: React.FC<IndexScreenProps> = ({
         {/* TAB 3: CAREER TELEMETRY */}
         {tab === 'telemetry' && (
           <div className="orbit-scroll h-full space-y-6 overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 tabular-nums">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 tabular-nums">
+              <div className="border border-white/12 bg-[#101420] p-4">
+                <span className="block text-xs text-[#a1abbe]">Mastery Prestige</span>
+                <span
+                  className="font-display mt-1 block text-xl font-black truncate"
+                  style={{ color: prestige.tierColor }}
+                >
+                  {prestige.tierTitle}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-[#808ba1]">
+                  {prestige.points.toLocaleString()} PTS · {prestige.ssMasteryPct.toFixed(0)}% SS
+                </span>
+              </div>
               <div className="border border-white/12 bg-[#101420] p-4">
                 <span className="block text-xs text-[#a1abbe]">High Score</span>
                 <span className="mt-1 block text-2xl font-black text-white">

@@ -127,12 +127,27 @@ class OrbitAudioEngine {
     const task = (async () => {
       try {
         if (song.audioUrl) {
-          const res = await fetch(song.audioUrl);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const arrayBuf = await res.arrayBuffer();
-          const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
-          this.bufferCache.set(song.id, decoded);
-          return decoded;
+          try {
+            const res = await fetch(song.audioUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            if (contentType.includes('text/html')) {
+              throw new Error('HTML returned instead of audio');
+            }
+            const arrayBuf = await res.arrayBuffer();
+            if (arrayBuf.byteLength >= 512) {
+              const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+              this.bufferCache.set(song.id, decoded);
+              return decoded;
+            }
+          } catch (innerErr) {
+            console.warn(`Audio file fallback triggered for ${song.title}:`, innerErr);
+          }
+        }
+        const rendered = this.synthesizeTrackBuffer(ctx, song);
+        if (rendered) {
+          this.bufferCache.set(song.id, rendered);
+          return rendered;
         }
         return null;
       } catch (err) {
@@ -145,6 +160,224 @@ class OrbitAudioEngine {
 
     this.loadingPromises.set(song.id, task);
     return task;
+  }
+
+  private synthesizeTrackBuffer(
+    ctx: AudioContext,
+    song: SongDefinition,
+  ): AudioBuffer | null {
+    try {
+      const sr = Math.min(44100, Math.max(22050, ctx.sampleRate || 44100));
+      const duration = Math.max(16, Math.min(420, song.durationSec || 120));
+      const totalSamples = Math.floor(sr * duration);
+      const buffer = ctx.createBuffer(2, totalSamples, sr);
+      const outL = buffer.getChannelData(0);
+      const outR = buffer.getChannelData(1);
+
+      const scale = song.scaleNotes && song.scaleNotes.length >= 4
+        ? song.scaleNotes
+        : [62, 64, 65, 67, 69, 70, 73, 74];
+      const pattern = song.synthFallback || {
+        style: song.demonOnly ? ('demon' as const) : ('electro' as const),
+        chords: [
+          [scale[0] - 12, scale[2] - 12, scale[4] - 12],
+          [scale[3] - 12, scale[5] - 12, scale[0]],
+          [scale[1] - 12, scale[3] - 12, scale[5] - 12],
+          [scale[4] - 12, scale[6] - 12, scale[1]],
+        ],
+        lead: [scale[0], scale[2], scale[4], scale[5], scale[4], scale[2], scale[1], scale[0]],
+      };
+
+      const beatSec = 60 / Math.max(70, song.bpm || 140);
+      const totalBeats = Math.floor((duration - 0.5) / beatSec);
+      const isDemon = pattern.style === 'demon' || pattern.style === 'rave' || Boolean(song.demonOnly);
+
+      const sectionAt = (pct: number) => {
+        let lbl = 'INTRO';
+        for (const cue of song.sections) {
+          if (pct >= cue.startPct) lbl = cue.label;
+        }
+        return lbl;
+      };
+
+      // Deterministic noise table for crisp snares & hi-hats
+      const noiseLen = Math.floor(sr * 0.2);
+      const noise = new Float32Array(noiseLen);
+      let seed = 0x13579bdf;
+      for (let i = 0; i < noiseLen; i++) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        noise[i] = (seed / 0xffffffff) * 2 - 1;
+      }
+
+      const twoPi = Math.PI * 2;
+      const addKick = (startSec: number, gain: number) => {
+        const idx0 = Math.floor(startSec * sr);
+        const len = Math.floor(Math.min(0.26, beatSec * 0.85) * sr);
+        let phase = 0;
+        for (let i = 0; i < len && idx0 + i < totalSamples; i++) {
+          const t = i / sr;
+          const freq = 42 + (isDemon ? 128 : 102) * Math.exp(-t * 36);
+          phase += (twoPi * freq) / sr;
+          const env = Math.exp(-t * 14) * Math.min(1, t / 0.003);
+          const s = Math.tanh(Math.sin(phase) * (isDemon ? 1.85 : 1.35)) * gain * env;
+          outL[idx0 + i] += s;
+          outR[idx0 + i] += s;
+        }
+      };
+
+      const addSnare = (startSec: number, gain: number) => {
+        const idx0 = Math.floor(startSec * sr);
+        const len = Math.floor(0.15 * sr);
+        let hpPrev = 0;
+        let hpOut = 0;
+        for (let i = 0; i < len && idx0 + i < totalSamples; i++) {
+          const t = i / sr;
+          const n = noise[i % noiseLen];
+          hpOut = 0.82 * (hpOut + n - hpPrev);
+          hpPrev = n;
+          const body = Math.sin(twoPi * (190 - t * 420) * t) * Math.exp(-t * 28);
+          const env = Math.exp(-t * 20) * Math.min(1, t / 0.002);
+          const s = (hpOut * 0.65 + body * 0.45) * gain * env;
+          outL[idx0 + i] += s;
+          outR[idx0 + i] += s;
+        }
+      };
+
+      const addHat = (startSec: number, gain: number, pan: number) => {
+        const idx0 = Math.floor(startSec * sr);
+        const len = Math.floor(0.048 * sr);
+        let p0 = 0;
+        let p1 = 0;
+        let p2 = 0;
+        const gL = gain * (1 - Math.max(0, pan) * 0.5);
+        const gR = gain * (1 - Math.max(0, -pan) * 0.5);
+        for (let i = 0; i < len && idx0 + i < totalSamples; i++) {
+          const t = i / sr;
+          const n = noise[(i + 97) % noiseLen];
+          const hp = n - 2 * p1 + p0;
+          p0 = p1;
+          p1 = n;
+          p2 = p2 * 0.35 + hp * 0.65;
+          const env = Math.exp(-t * 68) * Math.min(1, t / 0.001);
+          outL[idx0 + i] += p2 * gL * env;
+          outR[idx0 + i] += p2 * gR * env;
+        }
+      };
+
+      const addBass = (startSec: number, freq: number, durSec: number, gain: number, bright: boolean) => {
+        const idx0 = Math.floor(startSec * sr);
+        const len = Math.floor(durSec * sr);
+        let phase = 0;
+        let lp = 0;
+        for (let i = 0; i < len && idx0 + i < totalSamples; i++) {
+          const t = i / sr;
+          phase = (phase + freq / sr) % 1;
+          const saw = phase * 2 - 1;
+          const sub = Math.sin(twoPi * phase);
+          const cutoff = bright ? 0.38 : 0.2;
+          lp += cutoff * (saw - lp);
+          const env = Math.min(1, t / 0.008) * Math.exp((-t / durSec) * 2.2);
+          const s = (lp * 0.65 + sub * 0.45) * gain * env;
+          outL[idx0 + i] += s;
+          outR[idx0 + i] += s;
+        }
+      };
+
+      const addLead = (startSec: number, freq: number, durSec: number, gain: number, stereoPan: number, edgy: boolean) => {
+        const idx0 = Math.floor(startSec * sr);
+        const len = Math.floor(durSec * sr);
+        let pL = 0;
+        let pR = 0;
+        const gL = gain * (0.72 - stereoPan * 0.25);
+        const gR = gain * (0.72 + stereoPan * 0.25);
+        for (let i = 0; i < len && idx0 + i < totalSamples; i++) {
+          const t = i / sr;
+          pL = (pL + (freq * 0.996) / sr) % 1;
+          pR = (pR + (freq * 1.004) / sr) % 1;
+          const waveL = edgy ? (pL < 0.5 ? 0.8 : -0.8) * 0.5 + (pL * 2 - 1) * 0.5 : Math.sin(twoPi * pL) * 0.65 + (pL * 2 - 1) * 0.35;
+          const waveR = edgy ? (pR < 0.5 ? 0.8 : -0.8) * 0.5 + (pR * 2 - 1) * 0.5 : Math.sin(twoPi * pR) * 0.65 + (pR * 2 - 1) * 0.35;
+          const env = Math.min(1, t / 0.006) * Math.exp((-t / durSec) * 3.1);
+          outL[idx0 + i] += waveL * gL * env;
+          outR[idx0 + i] += waveR * gR * env;
+        }
+      };
+
+      for (let b = 0; b < totalBeats; b++) {
+        const t = 0.25 + b * beatSec;
+        const pct = t / duration;
+        const sec = sectionAt(pct);
+        const bar = Math.floor(b / 4);
+        const beatInBar = b % 4;
+        const chord = pattern.chords[bar % pattern.chords.length] || [50, 53, 57];
+        const isDrop = sec === 'DROP';
+        const isBuild = sec === 'BUILD-UP';
+        const isBreak = sec === 'BREAKDOWN' || sec === 'OUTRO';
+
+        if (!isBreak && (!isBuild || beatInBar % 2 === 0 || pct > 0.22)) {
+          addKick(t, isDrop ? 0.44 : 0.35);
+        }
+
+        if ((beatInBar === 1 || beatInBar === 3) && sec !== 'INTRO' && sec !== 'OUTRO') {
+          addSnare(t, isDrop ? 0.28 : 0.21);
+        }
+
+        const hatSub = isDrop ? 4 : isBuild ? 2 : 1;
+        for (let h = 0; h < hatSub; h++) {
+          const ht = t + (beatSec / hatSub) * h;
+          if (ht >= duration - 0.3) break;
+          if (!isDrop && h === 0 && sec === 'INTRO') continue;
+          addHat(ht, h % 2 === 1 ? 0.12 : 0.08, (h % 2 === 0 ? -1 : 1) * 0.35);
+        }
+
+        const bassRoot = midiToFreq((chord[0] || 50) - 12);
+        const bassSub = isDrop || isBuild ? 2 : 1;
+        for (let s = 0; s < bassSub; s++) {
+          const bt = t + (beatSec / bassSub) * s;
+          if (bt >= duration - 0.3) break;
+          addBass(bt, s === 1 ? bassRoot * 1.5 : bassRoot, (beatSec / bassSub) * 0.9, isBreak ? 0.14 : 0.26, isDrop);
+        }
+
+        if (beatInBar === 0 || (isDrop && beatInBar === 2)) {
+          chord.slice(0, 3).forEach((midi, ci) => {
+            addLead(
+              t,
+              midiToFreq(midi),
+              isDrop ? beatSec * 1.65 : beatSec * 3.2,
+              isDrop ? 0.095 : 0.07,
+              (ci - 1) * 0.55,
+              isDrop,
+            );
+          });
+        }
+
+        const leadNotes = pattern.lead;
+        const arpSteps = isDrop ? 2 : isBreak ? 2 : 1;
+        for (let a = 0; a < arpSteps; a++) {
+          const at = t + (beatSec / arpSteps) * a;
+          if (at >= duration - 0.3) break;
+          const noteMidi = leadNotes[(b * arpSteps + a) % leadNotes.length] || 74;
+          addLead(
+            at,
+            midiToFreq(noteMidi),
+            Math.min(0.24, (beatSec / arpSteps) * 0.86),
+            isDrop ? 0.13 : 0.095,
+            a % 2 === 0 ? -0.25 : 0.25,
+            isDrop || isDemon,
+          );
+        }
+      }
+
+      // Master soft-clip limiter pass
+      for (let i = 0; i < totalSamples; i++) {
+        outL[i] = Math.tanh(outL[i] * 0.95);
+        outR[i] = Math.tanh(outR[i] * 0.95);
+      }
+
+      return buffer;
+    } catch (err) {
+      console.warn('Direct PCM synth fallback failed:', err);
+      return null;
+    }
   }
 
   async decodeCustomFile(songId: string, file: File): Promise<DecodedCustomAudio | null> {

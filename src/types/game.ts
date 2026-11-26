@@ -11,24 +11,35 @@ export type ThemeId =
 
 export type HitSfxMode = 'switch' | 'harmonic' | 'rimshot';
 export type BgFxMode = 'dynamic' | 'clean' | 'minimal';
+export type OverdriveVfxMode = 'full' | 'subtle' | 'off';
 export type ScreenView = 'TITLE' | 'SONG_SELECT' | 'PLAYING' | 'SETTINGS' | 'INDEX' | 'SHOP';
 
 export type ModCode =
   | 'EZ'
   | 'NF'
   | 'SH'
+  | 'GA'
+  | 'SA'
+  | 'RG'
   | 'HR'
   | 'DT'
   | 'HD'
-  | 'SD'
   | 'FL'
+  | 'SD'
+  | 'BF'
+  | 'SM'
+  | 'DR'
+  | 'HO'
+  | 'VD'
   | 'OC'
   | 'OS'
   | 'MR'
-  | 'RX';
+  | 'RX'
+  | 'SG'
+  | 'CV';
 
 export type ModCategory = 'reduction' | 'increase' | 'special';
-export type SongCategory = 'tutorial' | 'arcade' | 'electronic' | 'christmas' | 'custom';
+export type SongCategory = 'tutorial' | 'arcade' | 'electronic' | 'christmas' | 'daily' | 'weekly' | 'custom';
 
 export type WaveModeId =
   | 'CW_GREEN'
@@ -91,7 +102,7 @@ export interface SongSectionCue {
 }
 
 export interface SynthFallbackPattern {
-  style: 'arcade' | 'electro' | 'house' | 'rave';
+  style: 'arcade' | 'electro' | 'house' | 'rave' | 'demon';
   chords: number[][];
   lead: number[];
 }
@@ -112,6 +123,10 @@ export interface SongDefinition {
   bgImageUrl: string;
   orbCost: number;
   chillOnly: boolean;
+  demonOnly?: boolean;
+  isDaily?: boolean;
+  isWeekly?: boolean;
+  rotationNumber?: number;
   isCustom?: boolean;
   customOnsets?: number[];
   synthFallback?: SynthFallbackPattern;
@@ -158,6 +173,14 @@ export interface TrophyBadge {
   orbReward: number;
 }
 
+export interface StackedNoteLayer {
+  modeId: WaveModeId;
+  angleOffsetRad?: number;
+  sizeScale?: number;
+  taps?: number;
+  holdDurationSec?: number;
+}
+
 export interface BeatmapNote {
   index: number;
   hitTime: number;
@@ -169,10 +192,12 @@ export interface BeatmapNote {
   speedScale?: number;
   holdDurationSec?: number;
   burstCount?: number;
+  stackedModes?: StackedNoteLayer[];
 }
 
 export interface TargetSector {
   id: number;
+  modeId?: WaveModeId;
   angle: number;
   baseAngle: number;
   halfWidth: number;
@@ -268,6 +293,7 @@ export interface PlayerProfile {
   hitSfxMode: HitSfxMode;
   audioOffsetMs: number;
   bgFxMode: BgFxMode;
+  overdriveVfxMode: OverdriveVfxMode;
   theme: ThemeId;
   unlockedThemes: ThemeId[];
   selectedSongId: string;
@@ -280,6 +306,7 @@ export interface PlayerProfile {
   mechanicStats: Partial<Record<WaveModeId, MechanicStat>>;
   orbs: number;
   totalOrbsEarned: number;
+  totalOverdrives: number;
   levelBgSettings: Record<string, LevelBackgroundSetting>;
   tutorialSongCompleted: boolean;
   devUnlocked: boolean;
@@ -293,6 +320,10 @@ export interface PlayerProfile {
   offsetDegSum: number;
   earlyMisses: number;
   lateMisses: number;
+  dailyStreak: number;
+  lastDailyDateKey: string;
+  completedDailyIds: string[];
+  completedWeeklyIds: string[];
 }
 
 export interface MilestoneForecast {
@@ -367,6 +398,11 @@ export interface PracticeCheckpoint {
   direction: 1 | -1;
   score: number;
   streak: number;
+  overdriveCharge: number;
+  overdrivePerfectsEarned: number;
+  overdriveUsedThisRun: boolean;
+  overdriveActive: boolean;
+  overdriveTimeLeft: number;
 }
 
 export interface NextCuePreview {
