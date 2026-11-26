@@ -1,14 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Shield } from 'lucide-react';
+import { Flag, Pause, Play, RotateCcw, Shield, Trash2, X } from 'lucide-react';
 import { CHASSIS_THEMES, NEEDLE_TOLERANCE, WAVE_MODES } from '../data/catalog';
-import { signedAngleDiff, TAU } from '../engine/beatmap';
+import { formatTimeSec, signedAngleDiff, TAU } from '../engine/beatmap';
 import {
   BgFxMode,
   GamePhase,
   HazardMine,
   HitEffect,
   HitErrorTick,
+  NextCuePreview,
   PortalPair,
+  PracticeCheckpoint,
+  ReplayInputEvent,
+  ShockwaveRing,
   SongSection,
   SongSectionCue,
   TargetSector,
@@ -52,6 +56,13 @@ export interface CanvasRenderState {
   rxModActive?: boolean;
   waitingForCue: boolean;
   breakRemainingSec: number;
+  overdriveCharge: number;
+  overdriveActive: boolean;
+  overdriveTimeLeft: number;
+  nextCuePreview: NextCuePreview | null;
+  shockwaves: ShockwaveRing[];
+  isPracticeMode: boolean;
+  isReplayMode: boolean;
 }
 
 interface OrbitStageProps {
@@ -84,6 +95,34 @@ interface OrbitStageProps {
   trigger2Code: string;
   trigger2Label: string;
   onSkipTutorial: () => void;
+  // Overdrive HUD
+  overdriveCharge: number;
+  overdriveActive: boolean;
+  overdriveTimeLeft: number;
+  // Practice Mode
+  isPracticeMode: boolean;
+  practiceSpeed: number;
+  practiceStartSec: number;
+  practiceCheckpoints: PracticeCheckpoint[];
+  songDurationSec: number;
+  songTime: number;
+  onDropCheckpoint: () => void;
+  onRemoveCheckpoint: () => void;
+  onRespawnCheckpoint: () => void;
+  onChangePracticeSpeed: (speed: number) => void;
+  onPracticeSeek: (sec: number) => void;
+  onExitPractice: () => void;
+  // Replay Theater
+  isReplayMode: boolean;
+  replayPaused: boolean;
+  replaySpeed: number;
+  replayEvents: ReplayInputEvent[];
+  replayLabel: string;
+  replayLastClickLabel: string;
+  onToggleReplayPause: () => void;
+  onChangeReplaySpeed: (speed: number) => void;
+  onReplaySeek: (sec: number) => void;
+  onExitReplay: () => void;
 }
 
 function getComboLabel(streak: number): string {
@@ -123,6 +162,31 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
   trigger2Code,
   trigger2Label,
   onSkipTutorial,
+  overdriveCharge,
+  overdriveActive,
+  overdriveTimeLeft,
+  isPracticeMode,
+  practiceSpeed,
+  practiceStartSec,
+  practiceCheckpoints,
+  songDurationSec,
+  songTime,
+  onDropCheckpoint,
+  onRemoveCheckpoint,
+  onRespawnCheckpoint,
+  onChangePracticeSpeed,
+  onPracticeSeek,
+  onExitPractice,
+  isReplayMode,
+  replayPaused,
+  replaySpeed,
+  replayEvents,
+  replayLabel,
+  replayLastClickLabel,
+  onToggleReplayPause,
+  onChangeReplaySpeed,
+  onReplaySeek,
+  onExitReplay,
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -290,6 +354,70 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
         ctx.stroke();
       }
 
+      // Radial Shockwave Rings (Beat 0 / Perfects / Overdrive Ignite)
+      if (bgFxMode !== 'minimal' && st.shockwaves.length > 0) {
+        for (let i = 0; i < st.shockwaves.length; i++) {
+          const sw = st.shockwaves[i];
+          const prog = 1 - sw.timer / Math.max(0.05, sw.duration);
+          const alpha = Math.max(0, (1 - prog) * 0.55);
+          const rRing = bezelOuterR + 4 + prog * maxR * 0.28;
+          ctx.save();
+          ctx.globalAlpha *= alpha;
+          ctx.beginPath();
+          ctx.arc(cx, cy, rRing, 0, TAU);
+          ctx.strokeStyle = sw.color;
+          ctx.lineWidth = 2.2 * (1 - prog * 0.5);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // Overdrive Anime Fire Aura around Bezel (10s 2x Orbs Surge!)
+      if (st.overdriveActive) {
+        const animT = performance.now() * 0.001;
+        const layers = [
+          { baseR: bezelOuterR + 10, amp: 8.5, freq: 9, speed: 11, col: 'rgba(239, 68, 68, 0.52)', lw: 5 },
+          { baseR: bezelOuterR + 6, amp: 6.2, freq: 13, speed: -15, col: 'rgba(249, 115, 22, 0.72)', lw: 3.5 },
+          { baseR: bezelOuterR + 3, amp: 3.8, freq: 17, speed: 19, col: 'rgba(253, 224, 71, 0.85)', lw: 2 },
+        ];
+        ctx.save();
+        for (let l = 0; l < layers.length; l++) {
+          const lay = layers[l];
+          ctx.beginPath();
+          const steps = 72;
+          for (let s = 0; s <= steps; s++) {
+            const ang = (s / steps) * TAU;
+            const wave =
+              Math.sin(ang * lay.freq + animT * lay.speed) * 0.6 +
+              Math.cos(ang * (lay.freq - 4) - animT * (lay.speed * 0.8)) * 0.4;
+            const rF = lay.baseR + Math.max(0, wave + 0.5) * lay.amp;
+            const px = cx + Math.cos(ang) * rF;
+            const py = cy + Math.sin(ang) * rF;
+            if (s === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = lay.col;
+          ctx.lineWidth = lay.lw;
+          ctx.stroke();
+        }
+
+        // Rising Anime Ember Sparks around Bezel
+        const emberCount = 14;
+        for (let e = 0; e < emberCount; e++) {
+          const phaseOffset = (e / emberCount + animT * 0.42) % 1;
+          const ang = (e * 2.39996 + animT * 0.55) % TAU;
+          const dist = bezelOuterR + 4 + phaseOffset * 24;
+          const ex = cx + Math.cos(ang) * dist;
+          const ey = cy + Math.sin(ang) * dist;
+          const sz = (1 - phaseOffset) * 3.2;
+          ctx.globalAlpha = Math.max(0, 1 - phaseOffset);
+          ctx.fillStyle = e % 2 === 0 ? '#fde047' : '#fb923c';
+          ctx.fillRect(ex - sz / 2, ey - sz / 2, sz, sz);
+        }
+        ctx.restore();
+      }
+
       // Solid Tactile Bezel Body
       ctx.beginPath();
       ctx.arc(cx, cy, bezelOuterR, 0, TAU);
@@ -297,14 +425,16 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cx, cy, bezelOuterR, 0, TAU);
-      ctx.strokeStyle = st.lessonSlowActive
+      ctx.strokeStyle = st.overdriveActive
+        ? '#fde047'
+        : st.lessonSlowActive
         ? '#fde047'
         : isIlluminated
         ? theme.bright
         : streakTier >= 2
         ? '#fbbf24'
         : '#2e3545';
-      ctx.lineWidth = st.lessonSlowActive ? 2.2 : 1.4;
+      ctx.lineWidth = st.overdriveActive ? 2.4 : st.lessonSlowActive ? 2.2 : 1.4;
       ctx.stroke();
 
       // Track Channel
@@ -316,27 +446,33 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
 
       ctx.beginPath();
       ctx.arc(cx, cy, outerRadius, 0, TAU);
-      ctx.strokeStyle = '#1f2430';
+      ctx.strokeStyle = st.overdriveActive ? 'rgba(251, 146, 60, 0.48)' : '#1f2430';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(cx, cy, innerRadius, 0, TAU);
-      ctx.strokeStyle = streakTier >= 2 ? '#374052' : '#1f2430';
+      ctx.strokeStyle = st.overdriveActive
+        ? 'rgba(253, 224, 71, 0.4)'
+        : streakTier >= 2
+        ? '#374052'
+        : '#1f2430';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Speed Trail behind Needle
+      // Speed Trail behind Needle (Blazing Anime Fire Trail during Overdrive)
       if (st.phase === 'PLAYING' || st.phase === 'TUTORIAL_CINEMATIC') {
         const trailStep = st.waveModeId === 'PURPLE_SURGE' ? 0.095 : 0.068;
+        const overdriveTrail = ['#991b1b', '#ea580c', '#f59e0b', '#fde047'];
         for (let t = 4; t >= 1; t--) {
           const aStart = st.spinnerAngle - st.direction * (t * trailStep);
           const aEnd = st.spinnerAngle - st.direction * ((t - 1) * trailStep);
           ctx.beginPath();
           ctx.arc(cx, cy, trackRadius, aStart, aEnd, st.direction === -1);
-          ctx.strokeStyle =
-            st.waveModeId === 'PURPLE_SURGE'
-              ? `rgba(168, 85, 247, ${(0.12 * (5 - t)).toFixed(2)})`
-              : theme.trailSteps[4 - t];
+          ctx.strokeStyle = st.overdriveActive
+            ? overdriveTrail[4 - t]
+            : st.waveModeId === 'PURPLE_SURGE'
+            ? `rgba(168, 85, 247, ${(0.12 * (5 - t)).toFixed(2)})`
+            : theme.trailSteps[4 - t];
           ctx.lineWidth = trackWidth - 6;
           ctx.stroke();
         }
@@ -389,6 +525,44 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 3;
         ctx.stroke();
+      }
+
+      // Visual Anticipation: Next-Note Ghost Radar & Pre-Flip Polarity Warning Chevron
+      if (st.phase === 'PLAYING' && st.nextCuePreview) {
+        const cue = st.nextCuePreview;
+        const fade = Math.max(0.18, Math.min(0.75, 1 - cue.timeUntilSpawn / 1.35));
+        const ghostHW = 0.28;
+        ctx.save();
+        ctx.globalAlpha *= fade;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, trackRadius, cue.angle - ghostHW, cue.angle + ghostHW);
+        ctx.strokeStyle = cue.color;
+        ctx.lineWidth = trackWidth * 0.42;
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Ghost center tick
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(cue.angle) * (innerRadius + 3), cy + Math.sin(cue.angle) * (innerRadius + 3));
+        ctx.lineTo(cx + Math.cos(cue.angle) * (outerRadius - 3), cy + Math.sin(cue.angle) * (outerRadius - 3));
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Pre-Flip Polarity Warning Chevron outside perimeter if spin reverses next wave
+        if (cue.isDirectionFlip) {
+          const warnR = outerRadius + 15;
+          const wx = cx + Math.cos(cue.angle) * warnR;
+          const wy = cy + Math.sin(cue.angle) * warnR;
+          const flipColor = cue.nextDir === -1 ? '#f87171' : '#34d399';
+          ctx.fillStyle = flipColor;
+          ctx.font = '900 10px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cue.nextDir === -1 ? 'FLIP ↺' : 'FLIP ↻', wx, wy);
+        }
+        ctx.restore();
       }
 
       // Target Sectors (including Hold Arc Ribbons & Fever Spinners)
@@ -681,15 +855,32 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
         ctx.restore();
       }
 
-      // Curved Hit-Error Timing Gauge
+      // Curved Hit-Error Timing Gauge + Perfect Zone Brackets
       const gaugeR = innerRadius * 0.78;
       const gaugeCenter = Math.PI / 2;
       const gaugeHalfSpan = 0.72;
+      const perfBracketHalf = gaugeHalfSpan * 0.27;
       ctx.beginPath();
       ctx.arc(cx, cy, gaugeR, gaugeCenter - gaugeHalfSpan, gaugeCenter + gaugeHalfSpan);
       ctx.strokeStyle = '#222733';
       ctx.lineWidth = 4;
       ctx.stroke();
+
+      // Highlighted Perfect window band inside gauge
+      ctx.beginPath();
+      ctx.arc(cx, cy, gaugeR, gaugeCenter - perfBracketHalf, gaugeCenter + perfBracketHalf);
+      ctx.strokeStyle = 'rgba(253, 224, 71, 0.45)';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      [gaugeCenter - perfBracketHalf, gaugeCenter + perfBracketHalf].forEach((bA) => {
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(bA) * (gaugeR - 4), cy + Math.sin(bA) * (gaugeR - 4));
+        ctx.lineTo(cx + Math.cos(bA) * (gaugeR + 4), cy + Math.sin(bA) * (gaugeR + 4));
+        ctx.strokeStyle = '#fde047';
+        ctx.lineWidth = 1.25;
+        ctx.stroke();
+      });
 
       ctx.beginPath();
       ctx.moveTo(cx, cy + gaugeR - 5);
@@ -871,24 +1062,77 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
             <span aria-hidden="true">·</span>
             <span>Best {bestScore.toLocaleString()}</span>
           </div>
-          {/* Compact Integrity Bar */}
+          {/* Compact Integrity Bar + Overdrive Surge Meter */}
           {!isTutorialRun && (
-            <div className="mt-2 flex items-center gap-2">
-              <div className="h-1.5 w-32 sm:w-40 overflow-hidden bg-white/10">
-                <div
-                  className="h-full transition-all duration-150"
-                  style={{ width: `${hpClamped}%`, backgroundColor: hpColor }}
-                />
+            <div className="mt-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 w-32 sm:w-40 overflow-hidden bg-white/10">
+                  <div
+                    className="h-full transition-all duration-150"
+                    style={{ width: `${hpClamped}%`, backgroundColor: hpColor }}
+                  />
+                </div>
+                <span className="tabular-nums text-[10px] font-bold text-[#b6bfd1]">
+                  {isPracticeMode ? 'PRAC' : noFailActive ? 'NF' : `${Math.round(hpClamped)}%`}
+                </span>
               </div>
-              <span className="tabular-nums text-[10px] font-bold text-[#b6bfd1]">
-                {noFailActive ? 'NF' : `${Math.round(hpClamped)}%`}
-              </span>
+
+              <div className="flex items-center gap-2">
+                <div
+                  className={`h-1.5 w-32 sm:w-40 overflow-hidden ${
+                    overdriveActive ? 'bg-[#fb923c]/25 ring-1 ring-[#fde047]/60' : 'bg-white/10'
+                  }`}
+                >
+                  <div
+                    className="h-full transition-all duration-100"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, overdriveCharge))}%`,
+                      background: overdriveActive
+                        ? 'linear-gradient(90deg, #ef4444, #f97316, #fde047)'
+                        : 'linear-gradient(90deg, #f97316, #fbbf24)',
+                    }}
+                  />
+                </div>
+                <span
+                  className={`tabular-nums text-[10px] font-extrabold whitespace-nowrap ${
+                    overdriveActive ? 'text-[#fde047]' : 'text-[#fb923c]'
+                  }`}
+                >
+                  {overdriveActive
+                    ? `OVERDRIVE 2× ORBS · ${overdriveTimeLeft.toFixed(1)}s`
+                    : `OD ${Math.round(overdriveCharge)}%`}
+                </span>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Top-Right: Tutorial Lives or Shields */}
+        {/* Top-Right: Practice / Replay Tag, Tutorial Lives, or Shields */}
         <div className="pointer-events-auto flex items-center gap-3 shrink-0">
+          {isPracticeMode && (
+            <div className="flex items-center gap-2 border border-[#38bdf8]/45 bg-[#0a1624]/95 px-3 py-1.5 text-[11px] font-extrabold tracking-wider text-[#38bdf8] whitespace-nowrap tabular-nums">
+              <span>PRACTICE · UNRANKED · {practiceSpeed}×</span>
+              <button
+                type="button"
+                onClick={onExitPractice}
+                className="text-white/80 hover:text-white underline cursor-pointer"
+              >
+                Exit
+              </button>
+            </div>
+          )}
+          {isReplayMode && (
+            <div className="flex items-center gap-2 border border-[#c084fc]/45 bg-[#191026]/95 px-3 py-1.5 text-[11px] font-extrabold tracking-wider text-[#e9d5ff] whitespace-nowrap tabular-nums">
+              <span>REPLAY · {replayLabel}</span>
+              <button
+                type="button"
+                onClick={onExitReplay}
+                className="text-white/80 hover:text-white underline cursor-pointer"
+              >
+                Exit
+              </button>
+            </div>
+          )}
           {isTutorialRun && (
             <div className="flex items-center gap-2.5 border border-white/15 bg-[#101420]/90 px-3 py-1.5 text-xs font-bold text-[#fbbf24] whitespace-nowrap">
               <span className="tabular-nums">Lives {tutorialLives}/3</span>
@@ -946,7 +1190,7 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
       >
         <canvas ref={canvasRef} className="block h-full w-full" />
 
-        {phase === 'IDLE' && (
+        {phase === 'IDLE' && !isReplayMode && (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
             <div className="lazer-slant-sm border border-white/15 bg-[#0e111a]/92 px-6 py-2 text-xs font-bold text-white">
               <span className="lazer-unslant-sm block">{promptHint}</span>
@@ -954,6 +1198,191 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
           </div>
         )}
       </div>
+
+      {/* GD-Style Practice Dock (Start Pos Scrubber + Checkpoints + Speed) */}
+      {isPracticeMode && !isReplayMode && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="relative z-20 mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center justify-between gap-2.5 border border-[#38bdf8]/35 bg-[#0b101b]/95 px-3.5 py-2 text-xs"
+        >
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onDropCheckpoint}
+              className="tactile-btn flex items-center gap-1 border border-[#34d399]/50 bg-[#0d241c] px-2.5 py-1 font-bold text-[#34d399] hover:border-[#34d399] cursor-pointer whitespace-nowrap"
+              title="Drop Checkpoint (Z)"
+            >
+              <Flag className="h-3.5 w-3.5" />
+              <span>Drop (Z)</span>
+            </button>
+            <button
+              type="button"
+              onClick={onRemoveCheckpoint}
+              disabled={practiceCheckpoints.length === 0}
+              className="tactile-btn flex items-center gap-1 border border-white/15 bg-[#121726] px-2.5 py-1 font-bold text-[#d1d5db] hover:border-white/35 disabled:opacity-40 cursor-pointer whitespace-nowrap"
+              title="Remove Last Checkpoint (X)"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Del (X)</span>
+            </button>
+            <button
+              type="button"
+              onClick={onRespawnCheckpoint}
+              className="tactile-btn flex items-center gap-1 border border-[#38bdf8]/45 bg-[#102033] px-2.5 py-1 font-bold text-[#38bdf8] hover:border-[#38bdf8] cursor-pointer whitespace-nowrap"
+              title="Respawn at Checkpoint / Start Pos (C)"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Respawn ({practiceCheckpoints.length})</span>
+            </button>
+          </div>
+
+          {/* Start Pos Timeline Scrubber with Diamond Checkpoint Pins */}
+          <div className="relative flex min-w-[160px] flex-1 items-center gap-2">
+            <span className="tabular-nums text-[10px] font-bold text-[#a1abbe] whitespace-nowrap">
+              {formatTimeSec(songTime)}
+            </span>
+            <div className="relative flex-1 flex items-center">
+              <input
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(songDurationSec - 2))}
+                step={0.5}
+                value={Math.min(songTime, Math.max(1, songDurationSec - 2))}
+                onChange={(e) => onPracticeSeek(Number(e.target.value))}
+                aria-label="Practice Start Position"
+                className="w-full accent-[#38bdf8] cursor-pointer"
+              />
+              {practiceCheckpoints.map((cp) => {
+                const pct = (cp.songTime / Math.max(1, songDurationSec)) * 100;
+                return (
+                  <span
+                    key={cp.id}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 -translate-x-1/2 rotate-45 border border-[#07080d] bg-[#34d399]"
+                    style={{ left: `${Math.max(0, Math.min(100, pct))}%` }}
+                  />
+                );
+              })}
+              {practiceStartSec > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1/2 h-2 w-2 -translate-y-1/2 -translate-x-1/2 bg-[#fde047]"
+                  style={{
+                    left: `${Math.max(0, Math.min(100, (practiceStartSec / Math.max(1, songDurationSec)) * 100))}%`,
+                  }}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Speed Selector */}
+          <div className="flex items-center gap-1 tabular-nums">
+            {[0.5, 0.75, 0.85, 1.0].map((spd) => (
+              <button
+                key={spd}
+                type="button"
+                onClick={() => onChangePracticeSpeed(spd)}
+                className={`tactile-btn border px-2 py-1 text-[11px] font-extrabold cursor-pointer ${
+                  practiceSpeed === spd
+                    ? 'border-[#38bdf8] bg-[#38bdf8] text-[#04121d]'
+                    : 'border-white/12 bg-[#121726] text-[#a1abbe] hover:text-white'
+                }`}
+              >
+                {spd}×
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Deterministic Replay Theater Dock */}
+      {isReplayMode && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="relative z-20 mx-auto mb-2 flex w-full max-w-4xl flex-wrap items-center justify-between gap-3 border border-[#c084fc]/40 bg-[#0d0b16]/95 px-3.5 py-2 text-xs"
+        >
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleReplayPause}
+              className="tactile-btn flex items-center gap-1.5 border border-[#c084fc]/55 bg-[#201233] px-3 py-1 font-bold text-white hover:border-[#c084fc] cursor-pointer"
+            >
+              {replayPaused ? <Play className="h-3.5 w-3.5 fill-current" /> : <Pause className="h-3.5 w-3.5" />}
+              <span>{replayPaused ? 'Play' : 'Pause'}</span>
+            </button>
+            <div className="flex items-center gap-1 tabular-nums">
+              {[0.5, 1.0, 2.0].map((spd) => (
+                <button
+                  key={spd}
+                  type="button"
+                  onClick={() => onChangeReplaySpeed(spd)}
+                  className={`tactile-btn border px-2 py-1 text-[11px] font-extrabold cursor-pointer ${
+                    replaySpeed === spd
+                      ? 'border-[#c084fc] bg-[#c084fc] text-[#140724]'
+                      : 'border-white/12 bg-[#141122] text-[#a1abbe] hover:text-white'
+                  }`}
+                >
+                  {spd}×
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Replay Timeline Scrubber with Color-Coded Input Ticks */}
+          <div className="relative flex min-w-[180px] flex-1 items-center gap-2">
+            <span className="tabular-nums text-[10px] font-bold text-[#e9d5ff] whitespace-nowrap">
+              {formatTimeSec(songTime)} / {formatTimeSec(songDurationSec)}
+            </span>
+            <div className="relative flex-1 flex items-center">
+              <input
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(songDurationSec))}
+                step={0.5}
+                value={Math.min(songTime, Math.max(1, songDurationSec))}
+                onChange={(e) => onReplaySeek(Number(e.target.value))}
+                aria-label="Replay Timeline"
+                className="w-full accent-[#c084fc] cursor-pointer"
+              />
+              {replayEvents
+                .filter((ev) => ev.action === 'PRESS')
+                .map((ev, idx) => {
+                  const pct = (ev.songTime / Math.max(1, songDurationSec)) * 100;
+                  const col =
+                    ev.tier === 'PERFECT'
+                      ? '#fde047'
+                      : ev.tier === 'GREAT'
+                      ? '#34d399'
+                      : ev.tier === 'GOOD'
+                      ? '#22d3ee'
+                      : '#ef4444';
+                  return (
+                    <span
+                      key={`${ev.songTime}-${idx}`}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1/2 h-2 w-[2px] -translate-y-1/2"
+                      style={{ left: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: col }}
+                    />
+                  );
+                })}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="hidden md:inline tabular-nums text-[11px] font-semibold text-[#d8b4fe] whitespace-nowrap">
+              {replayLastClickLabel || 'CBS Inspector Ready'}
+            </span>
+            <button
+              type="button"
+              onClick={onExitReplay}
+              className="tactile-btn flex items-center gap-1 border border-white/15 bg-[#151824] px-2.5 py-1 font-bold text-[#d1d5db] hover:text-white cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+              <span>Exit</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Unobtrusive Corner HUD — Bottom Row */}
       <div className="pointer-events-none relative z-20 flex w-full items-end justify-between gap-4">
@@ -963,13 +1392,21 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
             <span className="block text-[11px] font-semibold text-[#b6bfd1] whitespace-nowrap">
               {getComboLabel(streak)} ({streakMult.toFixed(2)}x)
             </span>
-            <span className="tabular-nums text-2xl sm:text-3xl font-black text-white leading-none">
+            <span
+              className={`tabular-nums text-2xl sm:text-3xl font-black leading-none ${
+                overdriveActive ? 'text-[#fde047]' : 'text-white'
+              }`}
+            >
               {streak}x
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-xs font-bold text-[#fbbf24] tabular-nums whitespace-nowrap">
             <OrbIcon className="h-4 w-4" />
-            <span>+{unbankedOrbs} Orbs</span>
+            <span>
+              {isPracticeMode
+                ? 'Unranked'
+                : `+${unbankedOrbs} Orbs${overdriveActive ? ' (2×)' : ''}`}
+            </span>
           </div>
         </div>
 

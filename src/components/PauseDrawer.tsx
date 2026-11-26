@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Home, ListMusic, Play, RotateCcw, X } from 'lucide-react';
+import { Flag, Home, ListMusic, Play, RotateCcw, X } from 'lucide-react';
 import { CHASSIS_THEMES } from '../data/catalog';
 import { BgFxMode, HitSfxMode, PauseTabId, PlayerProfile, ThemeId } from '../types/game';
 import { ArcadeSwitch } from './LazerChrome';
@@ -28,6 +28,9 @@ interface PauseDrawerProps {
   onSelectHitSfx: (mode: HitSfxMode) => void;
   onSelectTheme: (theme: ThemeId) => void;
   onSelectBgFx: (mode: BgFxMode) => void;
+  isPracticeMode: boolean;
+  isReplayMode: boolean;
+  onTogglePracticeMode: () => void;
 }
 
 const DRAWER_TABS: { id: PauseTabId; label: string }[] = [
@@ -59,6 +62,9 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
   onSelectHitSfx,
   onSelectTheme,
   onSelectBgFx,
+  isPracticeMode,
+  isReplayMode,
+  onTogglePracticeMode,
 }) => {
   if (!open) return null;
 
@@ -147,6 +153,19 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
                   <RotateCcw className="h-4 w-4 text-[#22d3ee]" />
                 </span>
               </button>
+
+              {!isReplayMode && (
+                <button
+                  type="button"
+                  onClick={onTogglePracticeMode}
+                  className="tactile-btn lazer-slant-sm flex w-full items-center justify-between border border-[#38bdf8]/40 bg-[#0d1929] px-5 py-3 text-left text-sm font-bold text-[#7dd3fc] hover:border-[#38bdf8] cursor-pointer"
+                >
+                  <span className="lazer-unslant-sm flex w-full items-center justify-between">
+                    <span>{isPracticeMode ? 'Exit Practice (Restart Ranked)' : 'Switch to Practice Mode'}</span>
+                    <Flag className="h-4 w-4 text-[#38bdf8]" />
+                  </span>
+                </button>
+              )}
 
               <button
                 type="button"

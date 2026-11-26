@@ -40,6 +40,7 @@ class OrbitAudioEngine {
   private playing = false;
   private startedAtCtxTime = 0;
   private startOffsetSec = 0;
+  private activePlaybackRate = 1.0;
 
   ensureContext(): AudioContext | null {
     if (!this.ctx) {
@@ -264,13 +265,15 @@ class OrbitAudioEngine {
     offsetSec: number,
     loop: boolean,
     previewGainScale: number,
+    playbackRate = 1.0,
   ): number {
     const safeOffset = Math.max(0, Math.min(offsetSec, Math.max(0, buffer.duration - 0.15)));
+    const safeRate = Math.max(0.25, Math.min(3.0, playbackRate));
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = loop;
-    // Strictly lock playbackRate to 1.0x — crisp zero-distortion audio across all difficulties
-    src.playbackRate.setValueAtTime(1.0, ctx.currentTime);
+    src.playbackRate.setValueAtTime(safeRate, ctx.currentTime);
+    this.activePlaybackRate = safeRate;
 
     const srcGain = ctx.createGain();
     const now = ctx.currentTime;
@@ -314,6 +317,7 @@ class OrbitAudioEngine {
     sfxVol: number,
     loop = false,
     previewGainScale = 1.0,
+    playbackRate = 1.0,
   ): Promise<number | null> {
     const ctx = this.ensureContext();
     if (!ctx) return null;
@@ -327,7 +331,7 @@ class OrbitAudioEngine {
     if (cachedBuf && ctx.state === 'running') {
       this.loadingSongId = null;
       this.updateVolumes(musicEnabled, musicVol, soundEnabled, sfxVol);
-      return this.launchBufferNode(ctx, cachedBuf, offsetSec, loop, previewGainScale);
+      return this.launchBufferNode(ctx, cachedBuf, offsetSec, loop, previewGainScale, playbackRate);
     }
 
     if (ctx.state === 'suspended') {
@@ -348,7 +352,7 @@ class OrbitAudioEngine {
       return null;
     }
 
-    return this.launchBufferNode(ctx, buffer, offsetSec, loop, previewGainScale);
+    return this.launchBufferNode(ctx, buffer, offsetSec, loop, previewGainScale, playbackRate);
   }
 
   syncClockAtPerfTime(perfMs: number = performance.now()): number | null {
@@ -384,7 +388,8 @@ class OrbitAudioEngine {
       effectiveCtxTime = this.ctx.currentTime - latencySec;
     }
 
-    const raw = this.startOffsetSec + Math.max(0, effectiveCtxTime - this.startedAtCtxTime);
+    const elapsedCtx = Math.max(0, effectiveCtxTime - this.startedAtCtxTime);
+    const raw = this.startOffsetSec + elapsedCtx * this.activePlaybackRate;
     if (this.activeLoop && this.activeBufferDuration > 0.2) {
       return raw % this.activeBufferDuration;
     }
@@ -791,6 +796,47 @@ class OrbitAudioEngine {
     osc.start(now);
     osc.stop(now + 0.06);
     return performance.now() + this.getReportedLatencyMs();
+  }
+
+  playOverdriveIgnite(enabled: boolean): void {
+    if (!enabled) return;
+    const ctx = this.getReadySfxCtx(true);
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    // Blazing anime ignition rising triad + harmonic shimmer
+    [392.0, 523.25, 659.25, 1046.5].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = idx % 2 === 0 ? 'sawtooth' : 'triangle';
+      osc.frequency.setValueAtTime(freq * 0.92, now + idx * 0.032);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.06, now + idx * 0.032 + 0.24);
+      gain.gain.setValueAtTime(0.0001, now + idx * 0.032);
+      gain.gain.linearRampToValueAtTime(0.11, now + idx * 0.032 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.032 + 0.28);
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.start(now + idx * 0.032);
+      osc.stop(now + idx * 0.032 + 0.3);
+    });
+  }
+
+  playCheckpointSound(enabled: boolean): void {
+    if (!enabled) return;
+    const ctx = this.getReadySfxCtx(true);
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(784, now);
+    osc.frequency.exponentialRampToValueAtTime(1174.66, now + 0.06);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.13, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.1);
   }
 }
 

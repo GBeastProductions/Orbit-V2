@@ -330,4 +330,57 @@ export interface RunSummaryData {
   missReason?: string;
   missDegrees?: string;
   isNewBest: boolean;
+  replayId?: string;
+  isPractice?: boolean;
 }
+
+export interface ReplayInputEvent {
+  songTime: number;
+  action: 'PRESS' | 'RELEASE';
+  cbsAngle: number;
+  tier?: JudgmentTier;
+  modeId?: WaveModeId;
+}
+
+export interface ReplayData {
+  id: string;
+  songId: string;
+  songTitle: string;
+  artist: string;
+  difficulty: DifficultyId;
+  equippedMods: ModCode[];
+  score: number;
+  accuracy: number;
+  rank: LetterRank;
+  maxCombo: number;
+  durationSec: number;
+  createdAtIso: string;
+  events: ReplayInputEvent[];
+  isBest?: boolean;
+}
+
+export interface PracticeCheckpoint {
+  id: number;
+  songTime: number;
+  beatmapIndex: number;
+  spinnerAngle: number;
+  direction: 1 | -1;
+  score: number;
+  streak: number;
+}
+
+export interface NextCuePreview {
+  angle: number;
+  modeId: WaveModeId;
+  color: string;
+  timeUntilSpawn: number;
+  isDirectionFlip: boolean;
+  nextDir: 1 | -1;
+}
+
+export interface ShockwaveRing {
+  timer: number;
+  duration: number;
+  color: string;
+}
+

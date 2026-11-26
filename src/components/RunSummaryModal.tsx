@@ -1,12 +1,14 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Award, ListMusic, RotateCcw } from 'lucide-react';
+import { Award, Film, ListMusic, RotateCcw } from 'lucide-react';
 import { computeNextMilestone } from '../engine/beatmap';
 import { RunSummaryData } from '../types/game';
 import { OrbIcon } from './OrbIcon';
 
 interface RunSummaryModalProps {
   summary: RunSummaryData | null;
+  hasReplay?: boolean;
+  onWatchReplay?: () => void;
   onRetry: () => void;
   onOpenSongSelect: () => void;
   onOpenOrbVault: () => void;
@@ -24,6 +26,8 @@ const RANK_COLORS: Record<string, string> = {
 
 export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
   summary,
+  hasReplay,
+  onWatchReplay,
   onRetry,
   onOpenSongSelect,
   onOpenOrbVault,
@@ -78,7 +82,8 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
             </h2>
             <p className="text-xs text-[#a1abbe]">
               {summary.artist} · {summary.difficulty}
-              {summary.isNewBest && ' · New Personal Best'}
+              {summary.isPractice && ' · Practice Run (Unranked)'}
+              {summary.isNewBest && !summary.isPractice && ' · New Personal Best'}
             </p>
           </div>
 
@@ -223,6 +228,16 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
               <ListMusic className="h-4 w-4" />
               <span>Track Select</span>
             </button>
+            {hasReplay && onWatchReplay && (
+              <button
+                type="button"
+                onClick={onWatchReplay}
+                className="tactile-btn flex items-center gap-2 border border-[#c084fc]/50 bg-[#1e1230] px-5 py-2.5 text-xs font-bold text-[#e9d5ff] hover:border-[#c084fc] cursor-pointer whitespace-nowrap"
+              >
+                <Film className="h-4 w-4 text-[#c084fc]" />
+                <span>Watch Replay</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onRetry}

@@ -2,6 +2,8 @@ import React, { useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
+  Film,
+  Flag,
   ImagePlus,
   Lock,
   Play,
@@ -42,6 +44,9 @@ interface SongSelectScreenProps {
   onToggleMusic: () => void;
   onSelectDifficulty: (diffId: DifficultyId) => void;
   onStartGame: () => void;
+  onStartPractice: () => void;
+  hasBestReplay: boolean;
+  onWatchReplay: () => void;
   onOpenMods: () => void;
   onOpenOrbVault: () => void;
   onUnlockDifficulty: (diffId: DifficultyId, cost: number) => void;
@@ -98,6 +103,9 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
     onToggleMusic,
     onSelectDifficulty,
     onStartGame,
+    onStartPractice,
+    hasBestReplay,
+    onWatchReplay,
     onOpenMods,
     onOpenOrbVault,
     onUnlockDifficulty,
@@ -716,17 +724,40 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                 </span>
               </button>
             ) : (
-              <button
-                type="button"
-                disabled={!canLaunch}
-                onClick={onStartGame}
-                className="tactile-btn lazer-slant flex items-center border border-[var(--accent-bright)] bg-[var(--accent)] px-5 sm:px-8 py-2 sm:py-2.5 text-xs sm:text-base font-black tracking-wide text-[var(--accent-on)] hover:bg-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
-              >
-                <span className="lazer-unslant flex items-center gap-1.5 sm:gap-2">
-                  <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-current" />
-                  <span>Launch Stage</span>
-                </span>
-              </button>
+              <div className="flex items-center gap-2 sm:gap-2.5">
+                {hasBestReplay && (
+                  <button
+                    type="button"
+                    onClick={onWatchReplay}
+                    className="tactile-btn flex items-center gap-1.5 border border-[#c084fc]/45 bg-[#1b112c] px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-[#e9d5ff] hover:border-[#c084fc] cursor-pointer whitespace-nowrap"
+                    title="Watch Saved Replay"
+                  >
+                    <Film className="h-3.5 w-3.5 text-[#c084fc]" />
+                    <span className="hidden sm:inline">Replay</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!canLaunch}
+                  onClick={onStartPractice}
+                  className="tactile-btn flex items-center gap-1.5 border border-[#38bdf8]/45 bg-[#0b1826] px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-[#7dd3fc] hover:border-[#38bdf8] cursor-pointer whitespace-nowrap"
+                  title="GD-Style Practice Mode with Start Pos & Checkpoints"
+                >
+                  <Flag className="h-3.5 w-3.5 text-[#38bdf8]" />
+                  <span>Practice</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!canLaunch}
+                  onClick={onStartGame}
+                  className="tactile-btn lazer-slant flex items-center border border-[var(--accent-bright)] bg-[var(--accent)] px-5 sm:px-8 py-2 sm:py-2.5 text-xs sm:text-base font-black tracking-wide text-[var(--accent-on)] hover:bg-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+                >
+                  <span className="lazer-unslant flex items-center gap-1.5 sm:gap-2">
+                    <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-current" />
+                    <span>Launch Stage</span>
+                  </span>
+                </button>
+              </div>
             )}
           </div>
         </footer>
