@@ -1,5 +1,5 @@
 export type DifficultyId = 'CHILL' | 'NORMAL' | 'HARD' | 'INSANE' | 'DEMON';
-export type ThemeId =
+export type BuiltInThemeId =
   | 'tokyo_pink'
   | 'shibuya_cyan'
   | 'emerald'
@@ -12,9 +12,134 @@ export type ThemeId =
   | 'cozy_christmas_2026'
   | 'krampusnacht_2026';
 
+export type ThemeId = BuiltInThemeId | (string & {});
+
 export type SkinParticlePreset = 'none' | 'sakura' | 'snow' | 'krampus_ash';
 export type SkinDialStyle = 'classic' | 'sakura_kintsugi' | 'christmas_frost' | 'krampus_forged';
 export type SkinTrimStyle = 'none' | 'sakura_blossom' | 'snow_cap' | 'krampus_iron';
+
+export type OverdriveAnimationType =
+  | 'flame_rise'
+  | 'pulse_shockwave'
+  | 'parallax_drift'
+  | 'helix_orbit'
+  | 'chromatic_split'
+  | 'lightning_strobe'
+  | 'petal_swirl'
+  | 'thermal_heatwave'
+  | 'slash_sweep'
+  | 'bounce_pop'
+  | 'flipbook_sheet'
+  | 'spark_emitter';
+
+export type OverdriveLayerAnchor =
+  | 'bottom_border'
+  | 'left_border'
+  | 'right_border'
+  | 'side_borders'
+  | 'screen_frame'
+  | 'center_aura';
+
+export interface OverdriveCustomLayer {
+  id: string;
+  name: string;
+  imageUrl: string;
+  anchor: OverdriveLayerAnchor;
+  animation: OverdriveAnimationType;
+  blendMode: 'screen' | 'lighter' | 'normal';
+  opacity: number;
+  scale: number;
+  speed: number;
+  buildupMinOpacity: number;
+  eruptBoost: number;
+  flipbookCols?: number;
+  flipbookRows?: number;
+  flipbookFps?: number;
+  enabled: boolean;
+}
+
+export interface EditableThemePayload {
+  id: string;
+  status: 'draft' | 'published';
+  label: string;
+  jpLabel: string;
+  orbCost: number;
+  isTransformationSkin?: boolean;
+  unlockRequirement?: string;
+  primary: string;
+  bright: string;
+  secondary: string;
+  dim: string;
+  onPrimary: string;
+  bgAccentRgb: string;
+  manifest: SkinPackManifest;
+  overdriveLayers?: OverdriveCustomLayer[];
+  hideBuiltInFlames?: boolean;
+  isBuiltInOverride?: boolean;
+  updatedAtIso?: string;
+}
+
+export interface HudWidgetOverride {
+  widgetId: string;
+  xOffsetPx: number;
+  yOffsetPx: number;
+  scale: number;
+  opacity: number;
+  visible: boolean;
+  customImageUrl?: string;
+  bgColor?: string;
+  borderColor?: string;
+  borderRadiusPx?: number;
+  labelOverride?: string;
+}
+
+export interface DevDockStyleConfig {
+  position: 'left' | 'right' | 'top';
+  opacity: number;
+  blurPx: number;
+  accentColor: string;
+  bgColor: string;
+  borderColor: string;
+  compact: boolean;
+  showTooltips: boolean;
+}
+
+export interface CustomDecorWidget {
+  id: string;
+  screen: 'TITLE' | 'SONG_SELECT' | 'PLAYING' | 'ALL';
+  kind: 'image' | 'badge';
+  text?: string;
+  imageUrl?: string;
+  xPct: number;
+  yPct: number;
+  widthPx: number;
+  heightPx: number;
+  opacity: number;
+  rotationDeg: number;
+  blendMode?: 'screen' | 'normal';
+}
+
+export interface PublishedHudLayout {
+  id: string;
+  status: 'draft' | 'published';
+  name: string;
+  widgets: Record<string, HudWidgetOverride>;
+  devDockStyle: DevDockStyleConfig;
+  customDecorWidgets?: CustomDecorWidget[];
+}
+
+export interface DevAssetItem {
+  id: string;
+  status: 'draft' | 'published';
+  name: string;
+  folder: string;
+  kind: 'image' | 'audio';
+  dataUrlOrPath: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  tags?: string[];
+  updatedAtIso?: string;
+}
 
 export type UIActionId =
   | 'play_primary'
@@ -185,6 +310,9 @@ export interface SongDefinition {
   rotationNumber?: number;
   isCustom?: boolean;
   customOnsets?: number[];
+  customBeatmap?: BeatmapNote[];
+  status?: 'draft' | 'published';
+  isPublishedOverride?: boolean;
   synthFallback?: SynthFallbackPattern;
   stars: Partial<Record<DifficultyId, string>>;
   desc: string;

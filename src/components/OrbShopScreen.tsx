@@ -16,8 +16,9 @@ import {
   DIFFICULTY_ORDER,
   MOD_CATALOG,
 } from '../data/catalog';
-import { getSkinPack } from '../data/skinManifests';
+import { getResolvedChassisTheme, getResolvedSkinPack } from '../store/studioRegistryStore';
 import { DifficultyId, ModCode, PlayerProfile, SongDefinition, ThemeId } from '../types/game';
+import { useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 import { SkinBladeTrim } from './SkinAtmosphere';
 
@@ -54,6 +55,7 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
   onUnlockMod,
   onToggleEquipMod,
 }) => {
+  const { themesMap } = useStudioLayout();
   const [tab, setTab] = useState<ShopTab>('all');
 
   const unlockableSongs = useMemo(() => songs.filter((s) => s.orbCost > 0), [songs]);
@@ -66,7 +68,13 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
     [unlockableSongs],
   );
   const shopMods = useMemo(() => MOD_CATALOG.filter((m) => m.orbCost > 0), []);
-  const allThemes = useMemo(() => Object.keys(CHASSIS_THEMES) as ThemeId[], []);
+  const allThemes = useMemo(
+    () =>
+      (Object.keys(themesMap).length > 0
+        ? Object.keys(themesMap)
+        : Object.keys(CHASSIS_THEMES)) as ThemeId[],
+    [themesMap],
+  );
 
   // Featured recommendation picks the first locked item the user can aim for, or Winter Solstice showcase
   const spotlightSong = useMemo(() => {
@@ -79,13 +87,15 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
   const unlockedSongCount = unlockableSongs.filter(
     (s) => profile.devUnlocked || profile.unlockedSongs.includes(s.id),
   ).length;
-  const ownedThemeCount = allThemes.filter(
-    (tid) =>
+  const ownedThemeCount = allThemes.filter((tid) => {
+    const t = getResolvedChassisTheme(tid, themesMap);
+    return (
       profile.devUnlocked ||
-      (!CHASSIS_THEMES[tid].isTransformationSkin && CHASSIS_THEMES[tid].orbCost === 0) ||
-      profile.unlockedThemes.includes(tid),
-  ).length;
-  const skin = getSkinPack(profile.theme);
+      (!t.isTransformationSkin && t.orbCost === 0) ||
+      profile.unlockedThemes.includes(tid)
+    );
+  }).length;
+  const skin = getResolvedSkinPack(profile.theme, themesMap);
 
   return (
     <motion.div
@@ -486,8 +496,8 @@ export const OrbShopScreen: React.FC<OrbShopScreenProps> = ({
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {allThemes.map((themeId) => {
-                const t = CHASSIS_THEMES[themeId];
-                const pack = getSkinPack(themeId);
+                const t = getResolvedChassisTheme(themeId, themesMap);
+                const pack = getResolvedSkinPack(themeId, themesMap);
                 const isTransform = Boolean(t.isTransformationSkin);
                 const owned =
                   profile.devUnlocked ||

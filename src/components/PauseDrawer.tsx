@@ -2,8 +2,10 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Flag, Home, ListMusic, Play, RotateCcw, X } from 'lucide-react';
 import { CHASSIS_THEMES } from '../data/catalog';
+import { getResolvedChassisTheme } from '../store/studioRegistryStore';
 import { BgFxMode, HitSfxMode, OverdriveVfxMode, PauseTabId, PlayerProfile, ThemeId } from '../types/game';
 import { ArcadeSwitch } from './LazerChrome';
+import { useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 
 interface PauseDrawerProps {
@@ -68,6 +70,7 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
   isReplayMode,
   onTogglePracticeMode,
 }) => {
+  const { themesMap } = useStudioLayout();
   if (!open) return null;
 
   return (
@@ -372,8 +375,8 @@ export const PauseDrawer: React.FC<PauseDrawerProps> = ({
               <div>
                 <span className="block text-xs font-bold text-white mb-2">Cabinet Theme</span>
                 <div className="grid grid-cols-2 gap-2">
-                  {(Object.keys(CHASSIS_THEMES) as ThemeId[]).map((tid) => {
-                    const t = CHASSIS_THEMES[tid];
+                  {((Object.keys(themesMap).length > 0 ? Object.keys(themesMap) : Object.keys(CHASSIS_THEMES)) as ThemeId[]).map((tid) => {
+                    const t = getResolvedChassisTheme(tid, themesMap);
                     const owned =
                       profile.devUnlocked ||
                       (!t.isTransformationSkin && t.orbCost === 0) ||

@@ -30,6 +30,7 @@ import bgWeekly04Img from '../assets/images/dw_weekly_04.jpg';
 import bgWeekly05Img from '../assets/images/dw_weekly_05.jpg';
 
 import {
+  BuiltInThemeId,
   ChassisTheme,
   DifficultyConfig,
   DifficultyId,
@@ -60,7 +61,21 @@ export const SONG_CATEGORIES: { id: 'all' | SongCategory; label: string; jpLabel
   { id: 'custom', label: 'Custom', jpLabel: 'カスタム' },
 ];
 
-export const CHASSIS_THEMES: Record<ThemeId, ChassisTheme> = {
+export const BUILT_IN_THEME_IDS: BuiltInThemeId[] = [
+  'tokyo_pink',
+  'shibuya_cyan',
+  'emerald',
+  'amber',
+  'crimson',
+  'shinjuku_violet',
+  'kyoto_jade',
+  'snowflake_frost',
+  'neon_sakura',
+  'cozy_christmas_2026',
+  'krampusnacht_2026',
+];
+
+export const CHASSIS_THEMES: Record<string, ChassisTheme> = {
   tokyo_pink: {
     id: 'tokyo_pink',
     label: 'Shibuya Pink',

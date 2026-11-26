@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowLeft, Pause, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { DifficultyId, SongDefinition } from '../types/game';
+import { StudioSlot } from './LiveLayoutWrapper';
 
 interface TopBarProps {
   activeSong: SongDefinition;
@@ -29,8 +30,9 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
     onOpenPause,
   }) => {
     return (
-      <header
-        className="relative z-20 flex h-[54px] shrink-0 items-center justify-between gap-4 border-t border-b px-4 sm:px-7 backdrop-blur-md"
+      <StudioSlot widgetId="stage_top_bar" label="Stage Top Bar" className="relative z-20 shrink-0">
+        <header
+          className="relative flex h-[54px] shrink-0 items-center justify-between gap-4 border-t border-b px-4 sm:px-7 backdrop-blur-md"
         style={{
           backgroundColor: 'var(--skin-header, rgba(8, 10, 17, 0.92))',
           borderBottomColor: 'var(--skin-border, rgba(255, 255, 255, 0.12))',
@@ -145,7 +147,8 @@ export const TopBar: React.FC<TopBarProps> = React.memo(
             style={{ width: `${Math.max(0, Math.min(100, songProgressPct))}%` }}
           />
         </div>
-      </header>
+        </header>
+      </StudioSlot>
     );
   },
 );

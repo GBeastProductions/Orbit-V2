@@ -1,3 +1,4 @@
+import { loadCustomAudioBytes, saveCustomAudioBytes } from '../store/mediaVaultStore';
 import { HitSfxMode, SongDefinition } from '../types/game';
 
 function midiToFreq(midi: number): number {
@@ -23,6 +24,7 @@ class OrbitAudioEngine {
   private sfxNoiseBuffer: AudioBuffer | null = null;
 
   private bufferCache = new Map<string, AudioBuffer>();
+  private audioSourceMap = new Map<string, 'mp3' | 'indexeddb' | 'synth'>();
   private loadingPromises = new Map<string, Promise<AudioBuffer | null>>();
   private activeSource: AudioBufferSourceNode | null = null;
   private activeSourceGain: GainNode | null = null;
@@ -114,6 +116,30 @@ class OrbitAudioEngine {
     }
   }
 
+  hasBuffered(songId: string): boolean {
+    return this.bufferCache.has(songId);
+  }
+
+  getBufferDuration(songId: string): number | null {
+    const buf = this.bufferCache.get(songId);
+    return buf ? buf.duration : null;
+  }
+
+  getTrackAudioSource(songId: string): 'mp3' | 'indexeddb' | 'synth' | 'unloaded' {
+    return this.audioSourceMap.get(songId) || 'unloaded';
+  }
+
+  clearBufferedSong(songId: string): void {
+    this.bufferCache.delete(songId);
+    this.audioSourceMap.delete(songId);
+    this.loadingPromises.delete(songId);
+  }
+
+  preloadSong(song: SongDefinition): void {
+    if (this.bufferCache.has(song.id) || this.loadingPromises.has(song.id)) return;
+    void this.loadSongBuffer(song);
+  }
+
   async loadSongBuffer(song: SongDefinition): Promise<AudioBuffer | null> {
     if (this.bufferCache.has(song.id)) {
       return this.bufferCache.get(song.id) || null;
@@ -126,6 +152,20 @@ class OrbitAudioEngine {
 
     const task = (async () => {
       try {
+        // 1. Check persistent IndexedDB Media Vault first (survives page reloads for custom/dev uploads)
+        const storedBytes = await loadCustomAudioBytes(song.id);
+        if (storedBytes && storedBytes.byteLength >= 4096) {
+          try {
+            const decodedStored = await ctx.decodeAudioData(storedBytes.slice(0));
+            this.bufferCache.set(song.id, decodedStored);
+            this.audioSourceMap.set(song.id, 'indexeddb');
+            return decodedStored;
+          } catch (storedErr) {
+            console.warn(`Stored IndexedDB audio decode failed for ${song.title}:`, storedErr);
+          }
+        }
+
+        // 2. Fetch static/remote MP3 if provided and validate real audio payload (>= 4 KB)
         if (song.audioUrl) {
           try {
             const res = await fetch(song.audioUrl);
@@ -135,18 +175,23 @@ class OrbitAudioEngine {
               throw new Error('HTML returned instead of audio');
             }
             const arrayBuf = await res.arrayBuffer();
-            if (arrayBuf.byteLength >= 512) {
+            if (arrayBuf.byteLength >= 4096) {
               const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
               this.bufferCache.set(song.id, decoded);
+              this.audioSourceMap.set(song.id, 'mp3');
               return decoded;
             }
+            throw new Error(`Placeholder or truncated audio file (${arrayBuf.byteLength} bytes)`);
           } catch (innerErr) {
             console.warn(`Audio file fallback triggered for ${song.title}:`, innerErr);
           }
         }
+
+        // 3. Deterministic PCM synth fallback so tracks like W1 never go silent
         const rendered = this.synthesizeTrackBuffer(ctx, song);
         if (rendered) {
           this.bufferCache.set(song.id, rendered);
+          this.audioSourceMap.set(song.id, 'synth');
           return rendered;
         }
         return null;
@@ -380,13 +425,17 @@ class OrbitAudioEngine {
     }
   }
 
-  async decodeCustomFile(songId: string, file: File): Promise<DecodedCustomAudio | null> {
+  async decodeCustomBufferForId(
+    songId: string,
+    arrayBuf: ArrayBuffer,
+  ): Promise<DecodedCustomAudio | null> {
     const ctx = this.ensureContext();
-    if (!ctx) return null;
+    if (!ctx || arrayBuf.byteLength < 4096) return null;
     try {
-      const arrayBuf = await file.arrayBuffer();
-      const buffer = await ctx.decodeAudioData(arrayBuf);
+      await saveCustomAudioBytes(songId, arrayBuf);
+      const buffer = await ctx.decodeAudioData(arrayBuf.slice(0));
       this.bufferCache.set(songId, buffer);
+      this.audioSourceMap.set(songId, 'indexeddb');
       const { estimatedBpm, onsets } = this.analyzeAudioBeats(buffer);
       return {
         buffer,
@@ -396,6 +445,16 @@ class OrbitAudioEngine {
       };
     } catch (err) {
       console.warn('Custom audio decode failed:', err);
+      return null;
+    }
+  }
+
+  async decodeCustomFile(songId: string, file: File): Promise<DecodedCustomAudio | null> {
+    try {
+      const arrayBuf = await file.arrayBuffer();
+      return await this.decodeCustomBufferForId(songId, arrayBuf);
+    } catch (err) {
+      console.warn('Custom audio file read failed:', err);
       return null;
     }
   }
@@ -555,6 +614,10 @@ class OrbitAudioEngine {
     const ctx = this.ensureContext();
     if (!ctx) return null;
     this.stop();
+    // Avoid racing/decoding looped menu previews when music is explicitly muted
+    if (loop && !musicEnabled) {
+      return null;
+    }
     const mySession = this.playSessionId;
     this.activeSongId = song.id;
     this.loadingSongId = song.id;
@@ -608,8 +671,8 @@ class OrbitAudioEngine {
           ts.contextTime > 0 &&
           ts.performanceTime > 0
         ) {
-          // Extrapolate exact audible sample time at perfMs
-          const deltaPerfSec = (perfMs - ts.performanceTime) / 1000;
+          // Clamp extrapolation cleanly so tab suspend/resume never causes multi-second clock jumps
+          const deltaPerfSec = Math.max(0, Math.min(0.25, (perfMs - ts.performanceTime) / 1000));
           effectiveCtxTime = ts.contextTime + deltaPerfSec;
         } else {
           effectiveCtxTime = this.ctx.currentTime - latencySec;

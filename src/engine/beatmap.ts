@@ -800,6 +800,29 @@ export function buildSongBeatmap(
   const minGap = Math.max(0.20, cfg.minGapSec * (dtActive ? 0.82 : 1.0));
   const targetGap = cfg.targetGapSec * (dtActive ? 0.84 : 1.0);
 
+  // Path 0: Dev Studio authored or customized timeline beatmap
+  if (song.customBeatmap && song.customBeatmap.length > 0) {
+    const mirror = equippedMods.includes('MR');
+    const sorted = [...song.customBeatmap].sort((a, b) => a.hitTime - b.hitTime);
+    return sorted.map((n, idx) => {
+      const next = sorted[idx + 1];
+      const gap = next ? Math.max(0.2, next.hitTime - n.hitTime) : Math.max(0.8, song.durationSec - n.hitTime);
+      let modeId = n.modeId;
+      if (mirror) {
+        if (modeId === 'CW_GREEN') modeId = 'CCW_RED';
+        else if (modeId === 'CCW_RED') modeId = 'CW_GREEN';
+      }
+      return {
+        ...n,
+        index: idx,
+        modeId,
+        stepSec: Number(Math.min(2.8, gap).toFixed(3)),
+        sizeScale: n.sizeScale ?? 1.0,
+        speedScale: n.speedScale ?? 1.0,
+      };
+    });
+  }
+
   // Path 1: Custom MP3 uploaded by player
   if (song.isCustom && song.customOnsets && song.customOnsets.length >= 8) {
     const notes: BeatmapNote[] = [];

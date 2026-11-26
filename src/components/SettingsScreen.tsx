@@ -13,10 +13,11 @@ import {
   Volume2,
 } from 'lucide-react';
 import { CHASSIS_THEMES } from '../data/catalog';
-import { getSkinPack } from '../data/skinManifests';
+import { getResolvedChassisTheme, getResolvedSkinPack } from '../store/studioRegistryStore';
 import { BgFxMode, HitSfxMode, OverdriveVfxMode, PlayerProfile, ThemeId } from '../types/game';
 import { ArcadeSwitch } from './LazerChrome';
 import { CalibrationWizard } from './CalibrationWizard';
+import { useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 import { SkinBladeTrim } from './SkinAtmosphere';
 
@@ -93,7 +94,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onResetDefaults,
   onTestTick,
 }) => {
-  const skin = getSkinPack(profile.theme);
+  const { themesMap } = useStudioLayout();
+  const skin = getResolvedSkinPack(profile.theme, themesMap);
+  const themeIds = (
+    Object.keys(themesMap).length > 0 ? Object.keys(themesMap) : Object.keys(CHASSIS_THEMES)
+  ) as ThemeId[];
   const [section, setSection] = useState<SettingsSection>('controls');
   const [pressedTest, setPressedTest] = useState<'k1' | 'k2' | null>(null);
   const [tapCalTimes, setTapCalTimes] = useState<number[]>([]);
@@ -532,7 +537,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
               <div>
                 <div className="mb-2.5 flex items-center justify-between">
-                  <span className="text-sm font-bold text-white">Cabinet Themes ({Object.keys(CHASSIS_THEMES).length})</span>
+                  <span className="text-sm font-bold text-white">Cabinet Themes ({themeIds.length})</span>
                   <button
                     type="button"
                     onClick={onOpenShop}
@@ -543,8 +548,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {(Object.keys(CHASSIS_THEMES) as ThemeId[]).map((tid) => {
-                    const t = CHASSIS_THEMES[tid];
+                  {themeIds.map((tid) => {
+                    const t = getResolvedChassisTheme(tid, themesMap);
                     const owned =
                       profile.devUnlocked ||
                       (!t.isTransformationSkin && t.orbCost === 0) ||

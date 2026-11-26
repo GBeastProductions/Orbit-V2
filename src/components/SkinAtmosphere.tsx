@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { getSkinPack } from '../data/skinManifests';
+import { getResolvedSkinPack } from '../store/studioRegistryStore';
 import { BgFxMode, SkinParticlePreset, ThemeId } from '../types/game';
+import { useStudioLayout } from './LiveLayoutWrapper';
 
 interface SkinAtmosphereProps {
   themeId: ThemeId;
@@ -73,7 +74,8 @@ function initParticles(preset: SkinParticlePreset, w: number, h: number): Partic
 
 export const SkinAtmosphere: React.FC<SkinAtmosphereProps> = React.memo(
   ({ themeId, bgFxMode, dimDuringPlay = false }) => {
-    const skin = getSkinPack(themeId);
+    const { themesMap } = useStudioLayout();
+    const skin = getResolvedSkinPack(themeId, themesMap);
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
@@ -264,7 +266,8 @@ export const SkinAtmosphere: React.FC<SkinAtmosphereProps> = React.memo(
 );
 
 export const SkinBladeTrim: React.FC<{ themeId: ThemeId }> = ({ themeId }) => {
-  const skin = getSkinPack(themeId);
+  const { themesMap } = useStudioLayout();
+  const skin = getResolvedSkinPack(themeId, themesMap);
   if (skin.trimStyle === 'none') return null;
 
   if (skin.trimStyle === 'sakura_blossom') {

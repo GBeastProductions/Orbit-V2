@@ -1,9 +1,10 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Award, Film, ListMusic, RotateCcw, Sparkles } from 'lucide-react';
-import { CHASSIS_THEMES } from '../data/catalog';
 import { computeNextMilestone } from '../engine/beatmap';
+import { getResolvedChassisTheme } from '../store/studioRegistryStore';
 import { RunSummaryData, ThemeId } from '../types/game';
+import { useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 
 interface RunSummaryModalProps {
@@ -35,6 +36,7 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
   onOpenOrbVault,
   onEquipTheme,
 }) => {
+  const { themesMap } = useStudioLayout();
   if (!summary) return null;
 
   const rankClass =
@@ -192,7 +194,7 @@ export const RunSummaryModal: React.FC<RunSummaryModalProps> = ({
               </div>
               <div className="mt-2.5 space-y-2">
                 {unlockedSkins.map((tid) => {
-                  const theme = CHASSIS_THEMES[tid];
+                  const theme = getResolvedChassisTheme(tid, themesMap);
                   if (!theme) return null;
                   return (
                     <div

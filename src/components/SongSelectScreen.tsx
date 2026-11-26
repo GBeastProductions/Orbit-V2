@@ -27,7 +27,6 @@ import {
   DIFFICULTIES,
   DIFFICULTY_ORDER,
 } from '../data/catalog';
-import { getSkinPack } from '../data/skinManifests';
 import {
   computeModMultiplier,
   computeNextMilestone,
@@ -38,6 +37,7 @@ import {
   getDailyRotationState,
   getWeeklyRotationState,
 } from '../store/dailyWeeklyStore';
+import { getResolvedSkinPack } from '../store/studioRegistryStore';
 import {
   DifficultyId,
   LevelBackgroundSetting,
@@ -45,6 +45,7 @@ import {
   SongDefinition,
 } from '../types/game';
 import { DiscCartridge } from './DiscCartridge';
+import { StudioSlot, useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 import { SkinBladeTrim } from './SkinAtmosphere';
 
@@ -244,7 +245,8 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
       : null;
 
     const modMult = computeModMultiplier(profile.equippedMods);
-    const skin = getSkinPack(profile.theme);
+    const { themesMap } = useStudioLayout();
+    const skin = getResolvedSkinPack(profile.theme, themesMap);
 
     return (
       <motion.div
@@ -263,8 +265,9 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
         />
 
         {/* Top Bar (3-Zone Contract) */}
+        <StudioSlot widgetId="song_select_topbar" label="Track Select Top Bar" className="relative z-20 shrink-0">
         <header
-          className="relative z-20 flex h-[56px] sm:h-[60px] shrink-0 items-center justify-between gap-2 sm:gap-4 border-b px-3 sm:px-8"
+          className="relative flex h-[56px] sm:h-[60px] shrink-0 items-center justify-between gap-2 sm:gap-4 border-b px-3 sm:px-8"
           style={{
             backgroundColor: skin.headerBg,
             borderColor: skin.surfaceBorder,
@@ -363,6 +366,7 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
             </button>
           </div>
         </header>
+        </StudioSlot>
 
         {/* Main 2-Column Stage */}
         <main className="relative z-20 mx-auto grid w-full max-w-[1380px] flex-1 grid-cols-1 gap-4 sm:gap-6 overflow-y-auto lg:overflow-hidden px-3 py-3 sm:px-8 lg:grid-cols-12 lg:py-5 orbit-scroll">
@@ -1219,17 +1223,19 @@ export const SongSelectScreen: React.FC<SongSelectScreenProps> = React.memo(
                   <Flag className="h-3.5 w-3.5 text-[#38bdf8]" />
                   <span>Practice</span>
                 </button>
-                <button
-                  type="button"
-                  disabled={!canLaunch}
-                  onClick={onStartGame}
-                  className="tactile-btn lazer-slant flex items-center border border-[var(--accent-bright)] bg-[var(--accent)] px-5 sm:px-8 py-2 sm:py-2.5 text-xs sm:text-base font-black tracking-wide text-[var(--accent-on)] hover:bg-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
-                >
-                  <span className="lazer-unslant flex items-center gap-1.5 sm:gap-2">
-                    <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-current" />
-                    <span>Launch Stage</span>
-                  </span>
-                </button>
+                <StudioSlot widgetId="song_select_launch_btn" label="Launch Stage CTA">
+                  <button
+                    type="button"
+                    disabled={!canLaunch}
+                    onClick={onStartGame}
+                    className="tactile-btn lazer-slant flex items-center border border-[var(--accent-bright)] bg-[var(--accent)] px-5 sm:px-8 py-2 sm:py-2.5 text-xs sm:text-base font-black tracking-wide text-[var(--accent-on)] hover:bg-[var(--accent-bright)] cursor-pointer whitespace-nowrap"
+                  >
+                    <span className="lazer-unslant flex items-center gap-1.5 sm:gap-2">
+                      <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-current" />
+                      <span>Launch Stage</span>
+                    </span>
+                  </button>
+                </StudioSlot>
               </div>
             )}
           </div>

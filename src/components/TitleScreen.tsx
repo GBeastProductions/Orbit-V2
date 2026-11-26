@@ -8,11 +8,12 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { BADGE_CATALOG, CHASSIS_THEMES, WAVE_MODES } from '../data/catalog';
-import { getSkinPack } from '../data/skinManifests';
+import { BADGE_CATALOG, WAVE_MODES } from '../data/catalog';
 import { computeMasteryPrestige } from '../engine/beatmap';
+import { getResolvedChassisTheme, getResolvedSkinPack } from '../store/studioRegistryStore';
 import { PlayerProfile, SongDefinition } from '../types/game';
 import { DiscCartridge } from './DiscCartridge';
+import { StudioSlot, useStudioLayout } from './LiveLayoutWrapper';
 import { IndexIcon, OrbIcon } from './OrbIcon';
 import { SkinBladeTrim } from './SkinAtmosphere';
 
@@ -42,8 +43,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
     onToggleMusic,
     onHoverTick,
   }) => {
-    const theme = CHASSIS_THEMES[profile.theme] || CHASSIS_THEMES.tokyo_pink;
-    const skin = getSkinPack(profile.theme);
+    const { themesMap } = useStudioLayout();
+    const theme = getResolvedChassisTheme(profile.theme, themesMap);
+    const skin = getResolvedSkinPack(profile.theme, themesMap);
     const prestige = computeMasteryPrestige(profile, songs);
     const [pressedKey, setPressedKey] = useState<'k1' | 'k2' | null>(null);
     const [beatPhase, setBeatPhase] = useState(0);
@@ -158,14 +160,14 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
           style={{ borderColor: skin.surfaceBorder }}
         >
           {/* Zone 1: Single-line Brand Wordmark */}
-          <div className="flex items-baseline gap-3 whitespace-nowrap shrink-0">
+          <StudioSlot widgetId="title_hero_badge" label="Title Hero Wordmark" className="flex items-baseline gap-3 whitespace-nowrap shrink-0">
             <span className="font-display text-2xl sm:text-3xl font-black tracking-tight text-white">
               ORBIT
             </span>
             <span className="text-xs font-semibold tracking-[0.22em] text-[var(--accent-bright)]">
               {skin.isFullTransformation ? skin.subtitle : 'オービット'}
             </span>
-          </div>
+          </StudioSlot>
 
           {/* Zone 2: Quiet Unboxed Career Telemetry */}
           <div className="hidden md:flex items-center gap-4 text-xs text-[#b6bfd1] tabular-nums whitespace-nowrap">
@@ -219,6 +221,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
         {/* Main Asymmetric Split: Tokyo Turntable Disc (Left) + osu!lazer Menu Fan (Right) */}
         <main className="relative z-20 mx-auto flex w-full max-w-[1260px] flex-1 flex-col items-center justify-center gap-4 sm:gap-7 lg:flex-row lg:justify-between lg:gap-12 min-h-0">
           {/* Left Focal Anchor: Spinning Vinyl Disc Turntable */}
+          <StudioSlot widgetId="title_turntable" label="Center Turntable" className="shrink-0">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -271,6 +274,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
               </p>
             </div>
           </motion.div>
+          </StudioSlot>
 
           {/* Right Column: Kinetic osu!lazer Slanted Menu Blades */}
           <motion.nav
@@ -281,15 +285,25 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
             className="flex w-full max-w-[460px] flex-col gap-2 sm:gap-3"
           >
             {menuItems.map((item) => {
+              const widgetIdMap: Record<string, string> = {
+                play: 'title_play_btn',
+                tracks: 'title_tracks_btn',
+                shop: 'title_shop_btn',
+                index: 'title_index_btn',
+                settings: 'title_settings_btn',
+              };
               return (
-                <button
+                <StudioSlot
                   key={item.id}
+                  widgetId={widgetIdMap[item.id] || `title_${item.id}_btn`}
+                  label={item.label}
+                  className={item.offsetClass}
+                >
+                <button
                   type="button"
                   onClick={item.onClick}
                   onMouseEnter={onHoverTick}
-                  className={`tactile-btn group lazer-slant relative overflow-visible flex items-center justify-between border px-5 py-2.5 sm:px-6 sm:py-3.5 text-left cursor-pointer ${
-                    item.offsetClass
-                  } ${
+                  className={`tactile-btn group lazer-slant relative overflow-visible flex w-full items-center justify-between border px-5 py-2.5 sm:px-6 sm:py-3.5 text-left cursor-pointer ${
                     item.primary
                       ? 'border-[var(--accent-bright)] bg-[var(--accent)] text-[var(--accent-on)] shadow-[0_10px_32px_rgba(var(--bg-accent-rgb,255,59,130),0.28)] hover:bg-[var(--accent-bright)]'
                       : 'text-white hover:border-[var(--accent-bright)]'
@@ -330,6 +344,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(
                     </span>
                   </div>
                 </button>
+                </StudioSlot>
               );
             })}
           </motion.nav>

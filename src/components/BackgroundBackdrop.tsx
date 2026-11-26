@@ -1,6 +1,7 @@
 import React from 'react';
-import { getSkinPack } from '../data/skinManifests';
+import { getResolvedSkinPack } from '../store/studioRegistryStore';
 import { BgFxMode, LevelBackgroundSetting, ThemeId } from '../types/game';
+import { useStudioLayout } from './LiveLayoutWrapper';
 
 interface BackgroundBackdropProps {
   defaultImageUrl: string;
@@ -24,7 +25,8 @@ export const BackgroundBackdrop: React.FC<BackgroundBackdropProps> = React.memo(
     forceBlurPx,
     accentRgb = '255, 59, 130',
   }) => {
-    const skin = getSkinPack(themeId);
+    const { themesMap } = useStudioLayout();
+    const skin = getResolvedSkinPack(themeId, themesMap);
     const hasCustomTrackArt = Boolean(levelSetting?.customImageDataUrl);
     const useSkinScene =
       skin.isFullTransformation &&

@@ -6,7 +6,13 @@ import christmasGarlandImg from '../assets/images/skin_christmas_garland_ornamen
 import krampusIronImg from '../assets/images/skin_krampus_iron_ornament_1795711184104.jpg';
 import animeFlameTextureImg from '../assets/images/fx_anime_flame_plume_1795711184734.jpg';
 import { CHASSIS_THEMES } from './catalog';
-import { PlayerProfile, SkinPackManifest, ThemeId, UIActionId } from '../types/game';
+import {
+  BuiltInThemeId,
+  PlayerProfile,
+  SkinPackManifest,
+  ThemeId,
+  UIActionId,
+} from '../types/game';
 
 export const ANIME_FLAME_TEXTURE_URL = animeFlameTextureImg;
 
@@ -61,7 +67,7 @@ export const UI_ACTION_REGISTRY: Record<
   },
 };
 
-function makeClassicManifest(id: ThemeId): SkinPackManifest {
+function makeClassicManifest(id: BuiltInThemeId): SkinPackManifest {
   const c = CHASSIS_THEMES[id];
   return {
     id,
@@ -89,7 +95,7 @@ function makeClassicManifest(id: ThemeId): SkinPackManifest {
   };
 }
 
-export const SKIN_PACKS: Record<ThemeId, SkinPackManifest> = {
+export const SKIN_PACKS: Record<string, SkinPackManifest> = {
   tokyo_pink: makeClassicManifest('tokyo_pink'),
   shibuya_cyan: makeClassicManifest('shibuya_cyan'),
   emerald: makeClassicManifest('emerald'),
@@ -264,7 +270,18 @@ export const SKIN_PACKS: Record<ThemeId, SkinPackManifest> = {
   },
 };
 
-export function getSkinPack(themeId: ThemeId): SkinPackManifest {
+let runtimeManifestOverrides: Record<string, SkinPackManifest> = {};
+
+export function setRuntimeSkinPackOverrides(map: Record<string, SkinPackManifest>): void {
+  runtimeManifestOverrides = map;
+}
+
+export function getSkinPack(
+  themeId: ThemeId,
+  customOverrides?: Record<string, SkinPackManifest>,
+): SkinPackManifest {
+  if (customOverrides && customOverrides[themeId]) return customOverrides[themeId];
+  if (runtimeManifestOverrides[themeId]) return runtimeManifestOverrides[themeId];
   return SKIN_PACKS[themeId] || SKIN_PACKS.tokyo_pink;
 }
 

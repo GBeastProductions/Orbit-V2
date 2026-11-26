@@ -58,6 +58,11 @@ export const INITIAL_PROFILE: PlayerProfile = {
 };
 
 const VALID_THEMES = Object.keys(CHASSIS_THEMES) as ThemeId[];
+function isValidThemeSlug(t: unknown): t is ThemeId {
+  if (typeof t !== 'string') return false;
+  if (VALID_THEMES.includes(t)) return true;
+  return /^[a-z0-9_]{1,48}$/.test(t);
+}
 const VALID_VFX_MODES: OverdriveVfxMode[] = ['full', 'subtle', 'off'];
 const VALID_MODS: ModCode[] = [
   'EZ',
@@ -119,7 +124,7 @@ export function loadProfile(): PlayerProfile {
           : INITIAL_PROFILE.unlockedSongs,
       unlockedThemes:
         Array.isArray(parsed.unlockedThemes) && parsed.unlockedThemes.length > 0
-          ? (parsed.unlockedThemes.filter((t) => VALID_THEMES.includes(t)) as ThemeId[])
+          ? (parsed.unlockedThemes.filter(isValidThemeSlug) as ThemeId[])
           : INITIAL_PROFILE.unlockedThemes,
       totalOverdrives:
         typeof parsed.totalOverdrives === 'number' ? Math.max(0, parsed.totalOverdrives) : 0,
@@ -136,7 +141,7 @@ export function loadProfile(): PlayerProfile {
         ? parsed.completedWeeklyIds.filter((id): id is string => typeof id === 'string')
         : [],
     };
-    if (!VALID_THEMES.includes(merged.theme)) merged.theme = 'tokyo_pink';
+    if (!isValidThemeSlug(merged.theme)) merged.theme = 'tokyo_pink';
     if (!(merged.selectedDifficulty in DIFFICULTIES)) merged.selectedDifficulty = 'CHILL';
     return merged;
   } catch {

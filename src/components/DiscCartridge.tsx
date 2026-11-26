@@ -1,7 +1,8 @@
 import React from 'react';
 import { Disc3, Lock } from 'lucide-react';
-import { getSkinPack } from '../data/skinManifests';
+import { getResolvedSkinPack } from '../store/studioRegistryStore';
 import { ThemeId } from '../types/game';
+import { useStudioLayout } from './LiveLayoutWrapper';
 
 interface DiscCartridgeProps {
   imageUrl: string;
@@ -36,7 +37,8 @@ export const DiscCartridge: React.FC<DiscCartridgeProps> = ({
   className = '',
 }) => {
   const isHero = size === 'hero';
-  const skin = getSkinPack(themeId);
+  const { themesMap } = useStudioLayout();
+  const skin = getResolvedSkinPack(themeId, themesMap);
   const turntableOverlay = isHero
     ? skin.overlays.find((o) => o.slot === 'turntable')
     : undefined;

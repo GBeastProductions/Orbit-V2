@@ -11,10 +11,13 @@ import {
   X,
 } from 'lucide-react';
 import { CHASSIS_THEMES, NEEDLE_TOLERANCE, WAVE_MODES } from '../data/catalog';
+import { renderCustomOverdriveLayers } from '../data/overdriveAnimations';
 import { ANIME_FLAME_TEXTURE_URL, getSkinPack } from '../data/skinManifests';
 import { formatTimeSec, signedAngleDiff, TAU } from '../engine/beatmap';
+import { getResolvedChassisTheme, getResolvedSkinPack } from '../store/studioRegistryStore';
 import {
   BgFxMode,
+  EditableThemePayload,
   GamePhase,
   HazardMine,
   HitEffect,
@@ -32,6 +35,7 @@ import {
   TutorialLesson,
   WaveModeId,
 } from '../types/game';
+import { StudioSlot, useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 
 export interface CanvasRenderState {
@@ -145,6 +149,10 @@ interface OrbitStageProps {
   onChangeReplaySpeed: (speed: number) => void;
   onReplaySeek: (sec: number, skipAudioStart?: boolean) => void;
   onExitReplay: () => void;
+  // Axiom Dev Studio live preview
+  themesMap?: Record<string, EditableThemePayload>;
+  previewOverdriveCharge?: number | null;
+  previewOverdriveActive?: boolean;
 }
 
 function getComboLabel(streak: number): string {
@@ -643,7 +651,19 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
   onChangeReplaySpeed,
   onReplaySeek,
   onExitReplay,
+  themesMap: propThemesMap,
+  previewOverdriveCharge = null,
+  previewOverdriveActive = false,
 }) => {
+  const { themesMap: ctxThemesMap } = useStudioLayout();
+  const themesMap = propThemesMap || ctxThemesMap;
+  const themesMapRef = useRef(themesMap);
+  themesMapRef.current = themesMap;
+  const previewChargeRef = useRef(previewOverdriveCharge);
+  previewChargeRef.current = previewOverdriveCharge;
+  const previewActiveRef = useRef(previewOverdriveActive);
+  previewActiveRef.current = previewOverdriveActive;
+
   const wrapRef = useRef<HTMLDivElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const glResRef = useRef<OverdriveGlResources | null>(null);
@@ -657,7 +677,7 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
   const lastDragSecRef = useRef<number | null>(null);
   const pointerDownInsideRef = useRef(false);
 
-  const activeTheme = CHASSIS_THEMES[themeId] || CHASSIS_THEMES.tokyo_pink;
+  const activeTheme = getResolvedChassisTheme(themeId, themesMap);
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
@@ -748,11 +768,10 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
       glResRef.current = initOverdriveWebGL(glCanvas);
     }
 
-    const themeForSprites = CHASSIS_THEMES[themeId] || CHASSIS_THEMES.tokyo_pink;
+    const themeForSprites = getResolvedChassisTheme(themeId, themesMapRef.current);
     const sprites = buildOverdriveSprites(themeForSprites, (tintedAnime) => {
       sprites.animePlume = tintedAnime;
     });
-    const skinPack = getSkinPack(themeId);
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -780,7 +799,10 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
       const cx = width / 2 + st.shakeX;
       const cy = height / 2;
       const maxR = Math.min(width / 2, height / 2) * 0.9;
-      const theme = CHASSIS_THEMES[themeId] || CHASSIS_THEMES.tokyo_pink;
+      const liveThemes = themesMapRef.current;
+      const theme = getResolvedChassisTheme(themeId, liveThemes);
+      const skinPack = getResolvedSkinPack(themeId, liveThemes) || getSkinPack(themeId);
+      const themeEntry = liveThemes[themeId];
       const effVfxMode: OverdriveVfxMode = st.overdriveVfxMode ?? overdriveVfxMode;
       const vfxScale = effVfxMode === 'off' ? 0 : effVfxMode === 'subtle' ? 0.38 : 1.0;
 
@@ -827,9 +849,15 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
       const innerRadius = trackRadius - trackWidth / 2;
       const outerRadius = trackRadius + trackWidth / 2;
 
-      const chargeNorm = st.overdriveUsedThisRun && !st.overdriveActive
+      const previewChargeVal = previewChargeRef.current;
+      const isOdPreview = previewChargeVal !== null;
+      const chargeNorm = isOdPreview
+        ? Math.max(0, Math.min(1, previewChargeVal))
+        : st.overdriveUsedThisRun && !st.overdriveActive
         ? 0
         : Math.max(0, Math.min(1, st.overdriveCharge / 100));
+      const odIsActive = isOdPreview ? previewActiveRef.current : st.overdriveActive;
+      const hideBuiltInFlames = Boolean(themeEntry?.hideBuiltInFlames);
 
       // WebGL2 GLSL #version 300 es Bottom & Side Border Anime Fire (decoupled from spin direction!)
       const glRes = glResRef.current;
@@ -839,8 +867,8 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
 
-        if (vfxScale > 0.01 && (st.overdriveActive || chargeNorm >= 0.03)) {
-          const fadeOut = st.overdriveActive && st.overdriveTimeLeft < 0.9
+        if (!hideBuiltInFlames && vfxScale > 0.01 && (odIsActive || chargeNorm >= 0.03)) {
+          const fadeOut = !isOdPreview && odIsActive && st.overdriveTimeLeft < 0.9
             ? Math.max(0.12, st.overdriveTimeLeft / 0.9)
             : 1.0;
           const pRgb = hexToRgb01(theme.primary);
@@ -855,7 +883,7 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
           gl.uniform2f(glRes.uCenter, cx * dpr, glCanvas.height - cy * dpr);
           gl.uniform1f(glRes.uBezelR, bezelOuterR * dpr);
           gl.uniform1f(glRes.uCharge, chargeNorm);
-          gl.uniform1f(glRes.uActive, st.overdriveActive ? 1.0 : 0.0);
+          gl.uniform1f(glRes.uActive, odIsActive ? 1.0 : 0.0);
           gl.uniform1f(glRes.uVfxScale, vfxScale * fadeOut);
           gl.uniform1f(glRes.uBeatPulse, st.beatPulse);
           gl.uniform1f(glRes.uBass, st.bassEnergy);
@@ -868,13 +896,36 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
         }
       }
 
+      // Custom Multi-Layer User Image Overdrive Compositor (12 animations across borders/aura)
+      if (
+        vfxScale > 0 &&
+        (odIsActive || chargeNorm >= 0.02) &&
+        themeEntry?.overdriveLayers &&
+        themeEntry.overdriveLayers.length > 0
+      ) {
+        renderCustomOverdriveLayers(
+          ctx,
+          width,
+          height,
+          cx,
+          cy,
+          bezelOuterR,
+          performance.now() * 0.001,
+          chargeNorm,
+          odIsActive,
+          st.beatPulse,
+          st.bassEnergy,
+          themeEntry.overdriveLayers,
+        );
+      }
+
       // =========================================================================
       // SCREEN-BORDER RISING ANIME FIRE (Bottom + Side Edges Only, Never Obstructs Dial!)
       // =========================================================================
       const flameSprite = sprites.animePlume || sprites.flame;
-      if ((st.overdriveActive || chargeNorm >= 0.04) && vfxScale > 0) {
+      if (!hideBuiltInFlames && (odIsActive || chargeNorm >= 0.04) && vfxScale > 0) {
         const animT = performance.now() * 0.001;
-        const isActive = st.overdriveActive;
+        const isActive = odIsActive;
         const powCharge = isActive ? 1.0 : Math.pow(chargeNorm, 1.08);
         const fadeOut = isActive && st.overdriveTimeLeft < 0.9
           ? Math.max(0.12, st.overdriveTimeLeft / 0.9)
@@ -1908,7 +1959,7 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
       {/* Unobtrusive Corner HUD — Top Row */}
       <div className="pointer-events-none relative z-20 flex w-full items-start justify-between gap-4">
         {/* Top-Left: Score + HP Integrity Bar + Theme-Colored Overdrive Bar */}
-        <div className="flex flex-col">
+        <StudioSlot widgetId="stage_score_hud" label="Score & Integrity HUD" className="flex flex-col">
           <span className="tabular-nums text-3xl sm:text-4xl font-black tracking-tight text-white leading-none">
             {score.toLocaleString()}
           </span>
@@ -1936,7 +1987,7 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
               </div>
 
               {/* Theme-Colored Once-Per-Run Overdrive Meter (45% of Chart Perfects) */}
-              <div className="flex items-center gap-2">
+              <StudioSlot widgetId="stage_overdrive_meter" label="Overdrive Meter" className="flex items-center gap-2">
                 <div
                   className="h-2 w-36 sm:w-44 overflow-hidden transition-all"
                   style={{
@@ -1981,10 +2032,10 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
                     : `${Math.round(overdriveCharge)}% · ${overdrivePerfectsEarned}/${overdriveTargetPerfects} PERF`}
                   {overdriveVfxMode === 'off' ? ' · VFX OFF' : ''}
                 </span>
-              </div>
+              </StudioSlot>
             </div>
           )}
-        </div>
+        </StudioSlot>
 
         {/* Top-Right: Minimal Uncluttered Status */}
         <div className="pointer-events-auto flex items-center gap-3 shrink-0">
@@ -2080,9 +2131,14 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
 
       {/* Bottom Zone: Concept-Matched Precision Replay & Practice Bar OR Clean Corner HUD */}
       {isProTransportActive ? (
+        <StudioSlot
+          widgetId="stage_practice_bar"
+          label="Practice & Replay Transport"
+          className="relative z-20 mx-auto mt-1 w-full max-w-[1400px]"
+        >
         <div
           onPointerDown={(e) => e.stopPropagation()}
-          className="relative z-20 mx-auto mt-1 w-full max-w-[1400px] border bg-[#07060d]/95 backdrop-blur-md"
+          className="relative w-full border bg-[#07060d]/95 backdrop-blur-md"
           style={{
             borderColor: activeTheme.primary,
             boxShadow: `0 -4px 28px rgba(0, 0, 0, 0.85), 0 0 18px rgba(${activeTheme.bgAccentRgb}, 0.32)`,
@@ -2421,6 +2477,7 @@ export const OrbitStage: React.FC<OrbitStageProps> = ({
             </div>
           </div>
         </div>
+        </StudioSlot>
       ) : (
         <div className="pointer-events-none relative z-20 flex w-full items-end justify-between gap-4">
           {/* Bottom-Left: Combo + Unbanked Orbs */}

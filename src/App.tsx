@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { audioEngine } from './audio/audioEngine';
 import { BackgroundBackdrop } from './components/BackgroundBackdrop';
+import { AxiomDevStudio, DevToolTabId } from './components/dev/AxiomDevStudio';
 import { IndexScreen } from './components/IndexScreen';
 import { ZoomWarpTransition } from './components/LazerChrome';
+import { CustomDecorLayer, StudioLayoutProvider } from './components/LiveLayoutWrapper';
 import { ModDrawer } from './components/ModDrawer';
 import { OrbShopScreen } from './components/OrbShopScreen';
 import { CanvasRenderState, OrbitStage } from './components/OrbitStage';
@@ -15,7 +17,6 @@ import { SongSelectScreen } from './components/SongSelectScreen';
 import { TitleScreen } from './components/TitleScreen';
 import { TopBar } from './components/TopBar';
 import {
-  CHASSIS_THEMES,
   DIFFICULTIES,
   HERO_DISCO_IMAGE,
   MOD_CATALOG,
@@ -24,11 +25,17 @@ import {
   TUTORIAL_LESSONS,
   WAVE_MODES,
 } from './data/catalog';
-import { evaluateMilestoneThemes, getSkinPack } from './data/skinManifests';
+import { evaluateMilestoneThemes, setRuntimeSkinPackOverrides } from './data/skinManifests';
 import {
   auth,
   checkUserDeveloperRole,
+  deletePublishedDevAssetFromCloud,
+  fetchLivePublishedCatalog,
   fetchUserCloudProfile,
+  publishDevAssetToCloud,
+  publishHudLayoutToCloud,
+  publishSongToCloud,
+  publishThemeToCloud,
   signInWithGooglePopup,
   signOutAccount,
   syncUserProfileToCloud,
@@ -62,9 +69,24 @@ import {
   saveRunReplay,
 } from './store/replayStore';
 import {
+  buildEditableThemeFromBuiltIn,
+  clearStudioDrafts,
+  DEFAULT_HUD_LAYOUT,
+  getResolvedChassisTheme,
+  getResolvedSkinPack,
+  loadStudioDrafts,
+  LocalStudioDraftBundle,
+  mergeHudLayout,
+  mergeSongsCatalog,
+  mergeThemesCatalog,
+  saveStudioDrafts,
+} from './store/studioRegistryStore';
+import {
   BeatmapNote,
   BgFxMode,
+  DevAssetItem,
   DifficultyId,
+  EditableThemePayload,
   GamePhase,
   HitErrorTick,
   HitSfxMode,
@@ -76,11 +98,13 @@ import {
   PauseTabId,
   PlayerProfile,
   PracticeCheckpoint,
+  PublishedHudLayout,
   ReplayData,
   ReplayInputEvent,
   RunSummaryData,
   ScreenView,
   ShockwaveRing,
+  SkinPackManifest,
   SongDefinition,
   SongSection,
   TargetSector,
@@ -210,10 +234,43 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isDeveloper, setIsDeveloper] = useState<boolean>(false);
-  const [songs, setSongs] = useState<SongDefinition[]>(() => [
+  const [baseSongs, setBaseSongs] = useState<SongDefinition[]>(() => [
     ...SONG_CATALOG,
     ...getReleasedDailyWeeklySongs(),
   ]);
+  const [publishedCatalog, setPublishedCatalog] = useState<{
+    songs: SongDefinition[];
+    themes: EditableThemePayload[];
+    hudLayouts: PublishedHudLayout[];
+    assets: DevAssetItem[];
+  }>({ songs: [], themes: [], hudLayouts: [], assets: [] });
+  const [studioDrafts, setStudioDrafts] = useState<LocalStudioDraftBundle>(() => loadStudioDrafts());
+  const [devStudioOpen, setDevStudioOpen] = useState(false);
+  const [devActiveTab, setDevActiveTab] = useState<DevToolTabId>('overdrive');
+  const [hudEditModeActive, setHudEditModeActive] = useState(false);
+  const [selectedHudWidgetId, setSelectedHudWidgetId] = useState<string | null>(null);
+  const [odPreviewCharge, setOdPreviewCharge] = useState<number | null>(null);
+  const [odPreviewActive, setOdPreviewActive] = useState(false);
+
+  const songs = useMemo(
+    () => mergeSongsCatalog(baseSongs, publishedCatalog.songs, studioDrafts.draftSongs),
+    [baseSongs, publishedCatalog.songs, studioDrafts.draftSongs],
+  );
+  const mergedThemes = useMemo(
+    () => mergeThemesCatalog(publishedCatalog.themes, studioDrafts.draftThemes),
+    [publishedCatalog.themes, studioDrafts.draftThemes],
+  );
+  const mergedHudLayout = useMemo(
+    () => mergeHudLayout(publishedCatalog.hudLayouts, studioDrafts.draftHudLayout),
+    [publishedCatalog.hudLayouts, studioDrafts.draftHudLayout],
+  );
+  const mergedAssets = useMemo(() => {
+    const map = new Map<string, DevAssetItem>();
+    for (const a of publishedCatalog.assets) map.set(a.id, a);
+    for (const a of Object.values(studioDrafts.draftAssets)) map.set(a.id, a);
+    return Array.from(map.values());
+  }, [publishedCatalog.assets, studioDrafts.draftAssets]);
+
   const [screen, setScreen] = useState<ScreenView>('TITLE');
   const [previousScreen, setPreviousScreen] = useState<ScreenView>('TITLE');
   const [customAudioStatus, setCustomAudioStatus] = useState('');
@@ -263,6 +320,8 @@ export default function App() {
   profileRef.current = profile;
   const songsRef = useRef(songs);
   songsRef.current = songs;
+  const themesRef = useRef(mergedThemes);
+  themesRef.current = mergedThemes;
   const screenRef = useRef(screen);
   screenRef.current = screen;
   const pauseOpenRef = useRef(pauseOpen);
@@ -413,8 +472,18 @@ export default function App() {
   });
 
   useEffect(() => {
-    const t = CHASSIS_THEMES[profile.theme] || CHASSIS_THEMES.tokyo_pink;
-    const skin = getSkinPack(profile.theme);
+    saveStudioDrafts(studioDrafts);
+  }, [studioDrafts]);
+
+  useEffect(() => {
+    const manifestMap: Record<string, SkinPackManifest> = {};
+    for (const [tid, entry] of Object.entries(mergedThemes)) {
+      if (entry?.manifest) manifestMap[tid] = entry.manifest;
+    }
+    setRuntimeSkinPackOverrides(manifestMap);
+
+    const t = getResolvedChassisTheme(profile.theme, mergedThemes);
+    const skin = getResolvedSkinPack(profile.theme, mergedThemes);
     const root = document.documentElement.style;
     root.setProperty('--theme-primary', t.primary);
     root.setProperty('--theme-bright', t.bright);
@@ -434,7 +503,17 @@ export default function App() {
     root.setProperty('--skin-header', skin.headerBg);
     root.setProperty('--skin-blade', skin.bladeBg);
     root.setProperty('--skin-blade-hover', skin.bladeHoverBg);
-  }, [profile.theme]);
+  }, [mergedThemes, profile.theme]);
+
+  useEffect(() => {
+    let active = true;
+    void fetchLivePublishedCatalog(firebaseUser).then((catalog) => {
+      if (active) setPublishedCatalog(catalog);
+    });
+    return () => {
+      active = false;
+    };
+  }, [firebaseUser]);
 
   const updateProfile = useCallback(
     (updater: Partial<PlayerProfile> | ((p: PlayerProfile) => PlayerProfile)) => {
@@ -453,6 +532,10 @@ export default function App() {
         setFirebaseUser(null);
         setAuthUser(null);
         setIsDeveloper(false);
+        setDevStudioOpen(false);
+        setHudEditModeActive(false);
+        setOdPreviewCharge(null);
+        setOdPreviewActive(false);
         setAuthLoading(false);
         updateProfile((prev) => (prev.devUnlocked ? { ...prev, devUnlocked: false } : prev));
         return;
@@ -1479,9 +1562,21 @@ export default function App() {
           )
           .then((realDur) => {
             if (realDur && Math.abs(realDur - song.durationSec) > 1.5) {
-              setSongs((prev) =>
+              setBaseSongs((prev) =>
                 prev.map((item) => (item.id === song.id ? { ...item, durationSec: realDur } : item)),
               );
+              const curEng = engineRef.current;
+              if (curEng.phase === 'PLAYING' && curEng.songTime < 2.0 && !curEng.sandboxModeId) {
+                const updatedSong = { ...song, durationSec: realDur };
+                const rebuilt = buildSongBeatmap(updatedSong, diffId, mods);
+                const odRatioCur = mods.includes('SG') ? 0.35 : 0.45;
+                curEng.beatmap = rebuilt;
+                curEng.overdriveTargetPerfects = Math.max(
+                  4,
+                  Math.ceil(countBeatmapPerfectUnits(rebuilt) * odRatioCur),
+                );
+                setUiOverdriveTargetPerfects(curEng.overdriveTargetPerfects);
+              }
             }
           });
       } else {
@@ -1543,7 +1638,7 @@ export default function App() {
       }
       audioEngine.loadSongBuffer(active).then((buf) => {
         if (buf && Math.abs(buf.duration - active.durationSec) > 1.5) {
-          setSongs((prev) =>
+          setBaseSongs((prev) =>
             prev.map((item) => (item.id === active.id ? { ...item, durationSec: buf.duration } : item)),
           );
         }
@@ -1863,7 +1958,7 @@ export default function App() {
       const { diffId, mods } = getRunConfig(eng, p, song);
       const isUnranked = Boolean(eng.sandboxModeId || eng.practiceMode || eng.replayMode);
       const isPerfect = tier === 'PERFECT';
-      const th = CHASSIS_THEMES[p.theme] || CHASSIS_THEMES.tokyo_pink;
+      const th = getResolvedChassisTheme(p.theme, themesRef.current);
       const fxColor = tier === 'PERFECT' ? (eng.overdriveActive ? th.bright : '#ffffff') : tier === 'GREAT' ? '#34d399' : '#22d3ee';
       const effectiveModeId = hitModeId || eng.waveModeId;
 
@@ -2640,7 +2735,7 @@ export default function App() {
           setUiBeatLed(ledIdx);
           orbitEvents.emit('onBeat', { beatIndex: ledIdx, bpm: song.bpm, songId: song.id });
           if (ledIdx === 0 && eng.phase === 'PLAYING') {
-            const th = CHASSIS_THEMES[p.theme] || CHASSIS_THEMES.tokyo_pink;
+            const th = getResolvedChassisTheme(p.theme, themesRef.current);
             eng.shockwaves.push({
               timer: 0.42,
               duration: 0.42,
@@ -3508,7 +3603,7 @@ export default function App() {
           { startPct: 0.85, label: 'OUTRO' },
         ],
       };
-      setSongs((prev) => [...prev, newSong]);
+      setBaseSongs((prev) => [...prev, newSong]);
       updateProfile((prev) => ({
         ...prev,
         selectedSongId: customId,
@@ -3517,6 +3612,197 @@ export default function App() {
       setCustomAudioStatus(`Loaded "${newSong.title}" (${decoded.estimatedBpm} BPM).`);
     },
     [updateProfile],
+  );
+
+  // Axiom Dev Studio Handlers
+  const handleSaveThemeDraft = useCallback((theme: EditableThemePayload) => {
+    setStudioDrafts((prev) => ({
+      ...prev,
+      draftThemes: {
+        ...prev.draftThemes,
+        [theme.id]: { ...theme, status: 'draft' },
+      },
+    }));
+  }, []);
+
+  const handleResetBuiltInTheme = useCallback((id: ThemeId) => {
+    setStudioDrafts((prev) => {
+      const nextThemes = { ...prev.draftThemes };
+      delete nextThemes[id];
+      return { ...prev, draftThemes: nextThemes };
+    });
+    const base = buildEditableThemeFromBuiltIn(id);
+    setStudioDrafts((prev) => ({
+      ...prev,
+      draftThemes: {
+        ...prev.draftThemes,
+        [id]: { ...base, status: 'draft' },
+      },
+    }));
+  }, []);
+
+  const handleSaveSongDraft = useCallback((song: SongDefinition) => {
+    audioEngine.clearBufferedSong(song.id);
+    setStudioDrafts((prev) => ({
+      ...prev,
+      draftSongs: {
+        ...prev.draftSongs,
+        [song.id]: { ...song, status: 'draft' },
+      },
+    }));
+  }, []);
+
+  const handlePlaytestSong = useCallback(
+    (song: SongDefinition, startOffsetSec = 0) => {
+      setStudioDrafts((prev) => ({
+        ...prev,
+        draftSongs: {
+          ...prev.draftSongs,
+          [song.id]: { ...song, status: 'draft' },
+        },
+      }));
+      updateProfile((prev) => ({
+        ...prev,
+        selectedSongId: song.id,
+        unlockedSongs: prev.unlockedSongs.includes(song.id)
+          ? prev.unlockedSongs
+          : [...prev.unlockedSongs, song.id],
+      }));
+      setScreen('PLAYING');
+      window.setTimeout(() => {
+        resetRound(
+          true,
+          null,
+          startOffsetSec > 0
+            ? { practice: true, practiceStartSec: startOffsetSec, practiceSpeed: 1.0 }
+            : undefined,
+        );
+      }, 30);
+    },
+    [resetRound, updateProfile],
+  );
+
+  const handleUpdateHudLayout = useCallback((next: PublishedHudLayout) => {
+    setStudioDrafts((prev) => ({
+      ...prev,
+      draftHudLayout: { ...next, status: 'draft' },
+    }));
+  }, []);
+
+  const handleSafeResetLayout = useCallback(() => {
+    setHudEditModeActive(false);
+    setSelectedHudWidgetId(null);
+    setStudioDrafts((prev) => ({
+      ...prev,
+      draftHudLayout: { ...DEFAULT_HUD_LAYOUT, status: 'draft' },
+    }));
+  }, []);
+
+  const handleUpsertAsset = useCallback((asset: DevAssetItem) => {
+    setStudioDrafts((prev) => ({
+      ...prev,
+      draftAssets: {
+        ...prev.draftAssets,
+        [asset.id]: { ...asset, status: 'draft' },
+      },
+    }));
+  }, []);
+
+  const handleDeleteAsset = useCallback(
+    (assetId: string) => {
+      setStudioDrafts((prev) => {
+        const nextAssets = { ...prev.draftAssets };
+        delete nextAssets[assetId];
+        return { ...prev, draftAssets: nextAssets };
+      });
+      if (isDeveloper && publishedCatalog.assets.some((a) => a.id === assetId)) {
+        void deletePublishedDevAssetFromCloud(assetId).then(() => {
+          setPublishedCatalog((prev) => ({
+            ...prev,
+            assets: prev.assets.filter((a) => a.id !== assetId),
+          }));
+        });
+      }
+    },
+    [isDeveloper, publishedCatalog.assets],
+  );
+
+  const handlePublishAllCloud = useCallback(async (): Promise<string> => {
+    if (!firebaseUser || !isDeveloper) {
+      throw new Error('Verified developer Google account required.');
+    }
+    let count = 0;
+    let skippedAssets = 0;
+
+    for (const song of Object.values(studioDrafts.draftSongs)) {
+      await publishSongToCloud(firebaseUser, song, 'published');
+      count++;
+    }
+    for (const theme of Object.values(studioDrafts.draftThemes)) {
+      await publishThemeToCloud(firebaseUser, theme, 'published');
+      count++;
+    }
+    if (studioDrafts.draftHudLayout) {
+      await publishHudLayoutToCloud(firebaseUser, studioDrafts.draftHudLayout, 'published');
+      count++;
+    }
+    for (const asset of Object.values(studioDrafts.draftAssets)) {
+      if (asset.dataUrlOrPath.length > 280000) {
+        skippedAssets++;
+        continue;
+      }
+      await publishDevAssetToCloud(firebaseUser, asset, 'published');
+      count++;
+    }
+
+    const refreshed = await fetchLivePublishedCatalog(firebaseUser);
+    setPublishedCatalog(refreshed);
+    clearStudioDrafts();
+    setStudioDrafts({ draftSongs: {}, draftThemes: {}, draftHudLayout: null, draftAssets: {} });
+
+    return skippedAssets > 0
+      ? `Published ${count} item(s) live to Firestore (${skippedAssets} large asset(s) kept for GitHub push).`
+      : `Published ${count} item(s) live to Firestore!`;
+  }, [firebaseUser, isDeveloper, studioDrafts]);
+
+  const handleDiscardDrafts = useCallback(() => {
+    clearStudioDrafts();
+    setStudioDrafts({ draftSongs: {}, draftThemes: {}, draftHudLayout: null, draftAssets: {} });
+  }, []);
+
+  const handleUpdateWidgetOffsetFromOverlay = useCallback(
+    (widgetId: string, xOffsetPx: number, yOffsetPx: number) => {
+      const cur = mergedHudLayout;
+      const existing = cur.widgets[widgetId] || {
+        widgetId,
+        xOffsetPx: 0,
+        yOffsetPx: 0,
+        scale: 1,
+        opacity: 1,
+        visible: true,
+      };
+      handleUpdateHudLayout({
+        ...cur,
+        widgets: {
+          ...cur.widgets,
+          [widgetId]: { ...existing, xOffsetPx, yOffsetPx },
+        },
+      });
+    },
+    [handleUpdateHudLayout, mergedHudLayout],
+  );
+
+  const handleUpdateDecorPosFromOverlay = useCallback(
+    (decorId: string, xPct: number, yPct: number) => {
+      const cur = mergedHudLayout;
+      handleUpdateHudLayout({
+        ...cur,
+        customDecorWidgets: (cur.customDecorWidgets || []).map((d) =>
+          d.id === decorId ? { ...d, xPct, yPct } : d,
+        ),
+      });
+    },
+    [handleUpdateHudLayout, mergedHudLayout],
   );
 
   const activeSong = getActiveSong();
@@ -3529,7 +3815,7 @@ export default function App() {
     uiReplayMode && engineRef.current.replayData
       ? engineRef.current.replayData.equippedMods
       : profile.equippedMods;
-  const activeTheme = CHASSIS_THEMES[profile.theme] || CHASSIS_THEMES.tokyo_pink;
+  const activeTheme = getResolvedChassisTheme(profile.theme, mergedThemes);
   const activeBgSetting = profile.levelBgSettings[activeSong.id];
   const activeModeInfo = useMemo(
     () => WAVE_MODES.find((m) => m.id === uiWaveMode) || WAVE_MODES[0],
@@ -3569,6 +3855,18 @@ export default function App() {
     : `Press ${profile.trigger1Label}, ${profile.trigger2Label}, or click ring to launch`;
 
   return (
+    <StudioLayoutProvider
+      value={{
+        widgets: mergedHudLayout.widgets,
+        customDecorWidgets: mergedHudLayout.customDecorWidgets || [],
+        editModeActive: isDeveloper && hudEditModeActive,
+        selectedWidgetId: selectedHudWidgetId,
+        onSelectWidget: setSelectedHudWidgetId,
+        onUpdateWidgetOffset: handleUpdateWidgetOffsetFromOverlay,
+        onUpdateDecorPos: handleUpdateDecorPosFromOverlay,
+        themesMap: mergedThemes,
+      }}
+    >
     <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-[#07080d] text-[#f5f7fa]">
       <BackgroundBackdrop
         defaultImageUrl={screen === 'TITLE' ? activeSong.bgImageUrl || HERO_DISCO_IMAGE : activeSong.bgImageUrl}
@@ -3586,6 +3884,8 @@ export default function App() {
         bgFxMode={profile.bgFxMode}
         dimDuringPlay={screen === 'PLAYING'}
       />
+
+      <CustomDecorLayer screen={screen} />
 
       {screen === 'TITLE' && (
         <TitleScreen
@@ -3883,6 +4183,9 @@ export default function App() {
             onChangeReplaySpeed={changeReplaySpeed}
             onReplaySeek={(sec, skipAudioStart) => seekReplayToTime(sec, Boolean(skipAudioStart))}
             onExitReplay={exitReplayMode}
+            themesMap={mergedThemes}
+            previewOverdriveCharge={isDeveloper ? odPreviewCharge : null}
+            previewOverdriveActive={isDeveloper && odPreviewActive}
           />
         </>
       )}
@@ -3982,6 +4285,48 @@ export default function App() {
       />
 
       <ZoomWarpTransition active={Boolean(warpLaunchLabel)} label={warpLaunchLabel || ''} />
+
+      {isDeveloper && (
+        <AxiomDevStudio
+          open={devStudioOpen}
+          onToggleOpen={setDevStudioOpen}
+          activeTab={devActiveTab}
+          onSelectTab={setDevActiveTab}
+          profile={profile}
+          themesMap={mergedThemes}
+          songs={songs}
+          selectedSongId={activeSong.id}
+          hudLayout={mergedHudLayout}
+          assets={mergedAssets}
+          editModeActive={hudEditModeActive}
+          selectedWidgetId={selectedHudWidgetId}
+          previewCharge={odPreviewCharge}
+          previewActive={odPreviewActive}
+          draftSongsCount={Object.keys(studioDrafts.draftSongs).length}
+          draftThemesCount={Object.keys(studioDrafts.draftThemes).length}
+          hasDraftHud={Boolean(studioDrafts.draftHudLayout)}
+          draftAssetsCount={Object.keys(studioDrafts.draftAssets).length}
+          exportSongs={Object.values(studioDrafts.draftSongs)}
+          exportThemes={Object.values(studioDrafts.draftThemes)}
+          onToggleEditMode={() => setHudEditModeActive((v) => !v)}
+          onSelectWidget={setSelectedHudWidgetId}
+          onUpdateHudLayout={handleUpdateHudLayout}
+          onSafeResetLayout={handleSafeResetLayout}
+          onSaveThemeDraft={handleSaveThemeDraft}
+          onResetBuiltInTheme={handleResetBuiltInTheme}
+          onApplyPlayerTheme={(id) => updateProfile({ theme: id })}
+          onSaveSongDraft={handleSaveSongDraft}
+          onSelectSong={(songId) => previewSong(songId, true)}
+          onPlaytestSong={handlePlaytestSong}
+          onUpsertAsset={handleUpsertAsset}
+          onDeleteAsset={handleDeleteAsset}
+          onChangePreviewCharge={setOdPreviewCharge}
+          onTogglePreviewActive={setOdPreviewActive}
+          onPublishAllCloud={handlePublishAllCloud}
+          onDiscardDrafts={handleDiscardDrafts}
+        />
+      )}
     </div>
+    </StudioLayoutProvider>
   );
 }

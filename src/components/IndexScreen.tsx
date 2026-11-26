@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Award, BarChart3, BookOpen, Check, Crown, Lock, Play, Snowflake } from 'lucide-react';
 import { BADGE_CATALOG, WAVE_MODES } from '../data/catalog';
-import { getSkinPack } from '../data/skinManifests';
 import { computeMasteryPrestige, TAU } from '../engine/beatmap';
+import { getResolvedSkinPack } from '../store/studioRegistryStore';
 import { PlayerProfile, SongDefinition, WaveModeId, WaveModeInfo } from '../types/game';
+import { useStudioLayout } from './LiveLayoutWrapper';
 import { OrbIcon } from './OrbIcon';
 import { SkinBladeTrim } from './SkinAtmosphere';
 
@@ -231,7 +232,8 @@ export const IndexScreen: React.FC<IndexScreenProps> = ({
     (s) => profile.songRecords[s.id] && profile.songRecords[s.id].bestRank !== 'F',
   ).length;
   const prestige = computeMasteryPrestige(profile, songs);
-  const skin = getSkinPack(profile.theme);
+  const { themesMap } = useStudioLayout();
+  const skin = getResolvedSkinPack(profile.theme, themesMap);
 
   return (
     <motion.div
